@@ -1,0 +1,21 @@
+completeness_loop_config:
+  agents:
+    agent1_context_token_limit: 32000
+    agent1_system_prompt: null
+    agent2_context_token_limit: 32000
+    agent2_system_prompt: null
+  limits:
+    completion_threshold: 95
+    max_commits: 200
+    max_iterations: 50
+    max_runtime_hours: 12
+  model:
+    backend: ollama
+    base_url: null
+    max_tokens: 4096
+    name: devstral-small-2
+    temperature: 0.7
+  monitoring:
+    log_file: completeness_loop.log
+    log_level: INFO
+    token_tracking: true

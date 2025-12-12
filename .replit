@@ -1,2 +1,30 @@
+modules = ["python-3.11"]
 [agent]
 expertMode = true
+
+[nix]
+channel = "stable-25_05"
+packages = ["libxcrypt", "libyaml"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Completeness Loop CLI"
+
+[[workflows.workflow]]
+name = "Completeness Loop CLI"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py --help && echo \"\" && echo \"=== Completeness Loop CLI Ready ===\" && echo \"Run with: python main.py start --idea <path> --workspace <path>\" && echo \"\" && python main.py status --workspace . 2>/dev/null || echo \"No active session. Use 'python main.py start' to begin.\""
+
+[workflows.workflow.metadata]
+outputType = "console"
