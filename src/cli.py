@@ -303,6 +303,7 @@ class CompletenessREPL:
         )
         
         if idea_content.strip():
+            self.base_dir.mkdir(parents=True, exist_ok=True)
             idea_path = self.base_dir / "idea.md"
             idea_path.write_text(idea_content)
             self.idea_file = idea_path
