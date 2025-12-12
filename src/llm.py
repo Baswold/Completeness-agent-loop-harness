@@ -297,11 +297,16 @@ class OpenAIBackend(LLMBackend):
         base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
         api_key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY")
         
-        if not api_key:
+        if not api_key or api_key == "_DUMMY_API_KEY_":
             api_key = os.environ.get("OPENAI_API_KEY")
         
-        if not api_key:
-            raise ValueError("No OpenAI API key found. Set OPENAI_API_KEY or use Replit AI Integrations.")
+        if not api_key or api_key == "_DUMMY_API_KEY_":
+            raise ValueError(
+                "No OpenAI API key found.\n"
+                "Either:\n"
+                "  1. Run from the Replit workflow (Replit AI Integrations will provide the key)\n"
+                "  2. Set OPENAI_API_KEY environment variable"
+            )
         
         self.model = model
         self.client = OpenAI(api_key=api_key, base_url=base_url)
