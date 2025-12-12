@@ -285,6 +285,87 @@ class MLXBackend(LLMBackend):
         return "\n".join(formatted)
 
 
+class OpenAIBackend(LLMBackend):
+    """
+    OpenAI API backend using the official OpenAI Python client.
+    Automatically uses Replit AI Integrations credentials if available.
+    """
+    def __init__(self, model: str = "gpt-4o"):
+        import os
+        from openai import OpenAI
+        
+        base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+        api_key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY")
+        
+        if not api_key:
+            api_key = os.environ.get("OPENAI_API_KEY")
+        
+        if not api_key:
+            raise ValueError("No OpenAI API key found. Set OPENAI_API_KEY or use Replit AI Integrations.")
+        
+        self.model = model
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+    
+    def get_info(self) -> str:
+        return f"OpenAI ({self.model})"
+    
+    def supports_tools(self) -> bool:
+        return True
+    
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict]] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        try:
+            kwargs = {
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            
+            if tools:
+                kwargs["tools"] = tools
+            
+            response = self.client.chat.completions.create(**kwargs)
+            
+            choice = response.choices[0]
+            message = choice.message
+            usage = response.usage
+            
+            tool_calls_list = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    tool_calls_list.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    })
+            
+            return LLMResponse(
+                content=message.content or "",
+                tool_calls=tool_calls_list,
+                usage=TokenUsage(
+                    prompt_tokens=usage.prompt_tokens if usage else 0,
+                    completion_tokens=usage.completion_tokens if usage else 0,
+                    total_tokens=usage.total_tokens if usage else 0
+                ),
+                finish_reason=choice.finish_reason or "stop"
+            )
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling OpenAI: {str(e)}",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+
+
 class OpenAICompatibleBackend(LLMBackend):
     """
     Generic OpenAI-compatible API backend.
@@ -367,7 +448,8 @@ BACKEND_ALIASES = {
     "lm_studio": "lmstudio",
     "mlx": "mlx",
     "openai": "openai",
-    "http": "openai",
+    "gpt": "openai",
+    "http": "http",
 }
 
 # Default URLs for each backend
@@ -385,7 +467,8 @@ def create_backend(config) -> LLMBackend:
         - ollama: Ollama local server (default: localhost:11434)
         - lmstudio: LM Studio local server (default: localhost:1234)
         - mlx: Native Apple Silicon with mlx-lm
-        - openai/http: Any OpenAI-compatible API
+        - openai: OpenAI API (uses Replit AI Integrations or OPENAI_API_KEY)
+        - http: Any OpenAI-compatible API (requires base_url)
     """
     backend_type = config.model.backend.lower()
     backend_type = BACKEND_ALIASES.get(backend_type, backend_type)
@@ -402,8 +485,11 @@ def create_backend(config) -> LLMBackend:
         return MLXBackend(model=config.model.name)
     
     elif backend_type == "openai":
+        return OpenAIBackend(model=config.model.name)
+    
+    elif backend_type == "http":
         if not config.model.base_url:
-            raise ValueError("OpenAI-compatible backend requires base_url in config")
+            raise ValueError("HTTP backend requires base_url in config")
         return OpenAICompatibleBackend(
             base_url=config.model.base_url,
             model=config.model.name
@@ -412,7 +498,7 @@ def create_backend(config) -> LLMBackend:
     else:
         raise ValueError(
             f"Unknown backend: {backend_type}\n"
-            f"Supported: ollama, lmstudio, mlx, openai"
+            f"Supported: ollama, lmstudio, mlx, openai, http"
         )
 
 
@@ -422,7 +508,12 @@ def list_backends() -> str:
 Available LLM Backends:
 =======================
 
-1. Ollama (recommended for easy setup)
+1. OpenAI (recommended for Replit)
+   Backend: openai
+   Models: gpt-4o, gpt-4o-mini, gpt-4.1, o3-mini, etc.
+   Uses Replit AI Integrations (no API key needed!)
+
+2. Ollama (local LLM server)
    Backend: ollama
    Default URL: http://localhost:11434
    Setup:
@@ -430,7 +521,7 @@ Available LLM Backends:
      ollama pull devstral
      ollama serve
 
-2. LM Studio (great GUI, easy model management)
+3. LM Studio (great GUI, easy model management)
    Backend: lmstudio
    Default URL: http://localhost:1234
    Setup:
@@ -438,13 +529,13 @@ Available LLM Backends:
      2. Load a coding model (Devstral, CodeLlama, etc.)
      3. Start local server
 
-3. MLX (native Apple Silicon, fastest on Mac)
+4. MLX (native Apple Silicon, fastest on Mac)
    Backend: mlx
    Requires: pip install mlx-lm
    Note: Model downloaded automatically on first run
 
-4. OpenAI-compatible (any compatible API)
-   Backend: openai
+5. HTTP (any OpenAI-compatible API)
+   Backend: http
    Requires: base_url in config
    Works with: vLLM, text-generation-inference, etc.
 """

@@ -5,8 +5,8 @@ import yaml
 
 
 class ModelConfig(BaseModel):
-    name: str = "devstral-small-2"
-    backend: str = "ollama"
+    name: str = "gpt-4o-mini"
+    backend: str = "openai"
     max_tokens: int = 4096
     temperature: float = 0.7
     base_url: Optional[str] = None
