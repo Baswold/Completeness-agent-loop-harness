@@ -9,6 +9,7 @@ import sys
 
 from .config import LoopConfig
 from .orchestrator import Orchestrator, CycleResult
+from .llm import list_backends
 
 
 BANNER = r"""
@@ -329,6 +330,12 @@ def init_config(output: str):
     output_path = Path(output) if output else Path("config.yaml")
     config.save(output_path)
     print(f"Configuration saved to {output_path}")
+
+
+@cli.command()
+def backends():
+    """Show available LLM backends and setup instructions"""
+    print(list_backends())
 
 
 def main():
