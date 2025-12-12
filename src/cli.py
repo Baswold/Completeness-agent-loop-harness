@@ -5,30 +5,177 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 import signal
+import threading
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.style import Style
+from rich.table import Table
+from rich.markdown import Markdown
+from rich import box
+from prompt_toolkit import prompt
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.styles import Style as PTStyle
+from prompt_toolkit.formatted_text import HTML
 
 from .config import LoopConfig
 from .orchestrator import Orchestrator, CycleResult
 from .llm import list_backends
 
+console = Console()
 
-BANNER = """
-================================================================================
-                         COMPLETENESS LOOP
-                   Autonomous Multi-Agent Coding System
-================================================================================
-"""
+COLORS = {
+    "primary": "#4285f4",
+    "success": "#34a853",
+    "warning": "#fbbc04",
+    "error": "#ea4335",
+    "muted": "#9aa0a6",
+    "cyan": "#00bcd4",
+}
 
-HELP_TEXT = """
-Commands:
-  start <idea.md> <workspace>  Start a new loop
-  resume <workspace>           Resume a paused loop
-  status [workspace]           Show current status
-  score [workspace]            Show completeness history
-  backends                     List available LLM backends
-  config                       Generate example config
-  help                         Show this help
-  quit                         Exit the REPL
-"""
+pt_style = PTStyle.from_dict({
+    "prompt": "#4285f4 bold",
+    "": "#ffffff",
+})
+
+
+def print_welcome():
+    console.print()
+    welcome = Text()
+    welcome.append("✦ ", style=f"bold {COLORS['primary']}")
+    welcome.append("Completeness Loop", style="bold white")
+    console.print(Panel(
+        welcome,
+        border_style=COLORS["primary"],
+        box=box.ROUNDED,
+        padding=(0, 2),
+    ))
+    console.print()
+
+
+def print_config_info(config: LoopConfig):
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_column(style=COLORS["muted"])
+    table.add_column(style="white")
+    table.add_row("Backend", config.model.backend)
+    table.add_row("Model", config.model.name)
+    table.add_row("Max cycles", str(config.limits.max_iterations))
+    console.print(table)
+    console.print()
+
+
+def print_help():
+    console.print()
+    help_text = """[bold]Commands:[/]
+  [cyan]start[/] <idea.md> <workspace>  Start autonomous loop
+  [cyan]resume[/] <workspace>           Resume paused loop
+  [cyan]status[/] [workspace]           Show current status
+  [cyan]score[/] [workspace]            Show completeness history
+  [cyan]backends[/]                     List LLM backends
+  [cyan]config[/] [path]                Generate config file
+  [cyan]help[/]                         Show this help
+  [cyan]quit[/]                         Exit"""
+    console.print(Panel(help_text, border_style=COLORS["muted"], box=box.ROUNDED))
+    console.print()
+
+
+def print_error(msg: str):
+    console.print(f"[{COLORS['error']}]✗[/] {msg}")
+
+
+def print_success(msg: str):
+    console.print(f"[{COLORS['success']}]✓[/] {msg}")
+
+
+def print_info(msg: str):
+    ts = datetime.now().strftime("%H:%M:%S")
+    console.print(f"[{COLORS['muted']}]{ts}[/] {msg}")
+
+
+def progress_bar(score: int, width: int = 30) -> Text:
+    filled = int(score / 100 * width)
+    text = Text()
+    text.append("█" * filled, style=COLORS["success"])
+    text.append("░" * (width - filled), style=COLORS["muted"])
+    text.append(f" {score}%", style="bold white")
+    return text
+
+
+def format_duration(seconds: float) -> str:
+    return str(timedelta(seconds=int(seconds)))
+
+
+def print_cycle_result(result: CycleResult, phase: str):
+    console.print()
+    
+    header = Text()
+    header.append(f"Cycle {result.cycle_number}", style="bold white")
+    header.append(f"  [{phase}]", style=COLORS["cyan"])
+    
+    content = Text()
+    content.append("Score: ")
+    content.append_text(progress_bar(result.completeness_score))
+    content.append(f"\nTime:  {result.duration_seconds:.1f}s")
+    
+    if result.agent1_response:
+        tokens = result.agent1_response.usage.total_tokens
+        iters = result.agent1_response.iterations
+        content.append(f"\nAgent 1: {tokens:,} tokens, {iters} iterations")
+    
+    if result.agent2_review:
+        tokens = result.agent2_review.usage.total_tokens
+        content.append(f"\nAgent 2: {tokens:,} tokens")
+    
+    console.print(Panel(
+        content,
+        title=header,
+        border_style=COLORS["primary"],
+        box=box.ROUNDED,
+    ))
+    
+    if result.agent2_review:
+        if result.agent2_review.completed_items:
+            console.print(f"  [{COLORS['success']}]Completed:[/]")
+            for item in result.agent2_review.completed_items[:3]:
+                console.print(f"    + {item[:65]}")
+        
+        if result.agent2_review.remaining_work:
+            console.print(f"  [{COLORS['warning']}]Remaining:[/]")
+            for item in result.agent2_review.remaining_work[:3]:
+                console.print(f"    - {item[:65]}")
+    
+    if result.error:
+        print_error(result.error)
+    
+    console.print()
+
+
+def print_final_summary(status: dict, elapsed: float):
+    console.print()
+    
+    state_label = "COMPLETE" if status["is_complete"] else "PAUSED" if status.get("is_paused") else "STOPPED"
+    state_color = COLORS["success"] if status["is_complete"] else COLORS["warning"]
+    
+    content = Text()
+    content.append("Final Score: ")
+    content.append_text(progress_bar(status["current_score"]))
+    content.append(f"\nPhase:       {status.get('phase', 'implementation')}")
+    content.append(f"\nCycles:      {status['cycle_count']}")
+    content.append(f"\nRuntime:     {format_duration(elapsed)}")
+    content.append(f"\nTokens:      {status['total_tokens']:,}")
+    content.append(f"\nStatus:      ")
+    content.append(state_label, style=f"bold {state_color}")
+    
+    console.print(Panel(
+        content,
+        title="Session Complete",
+        border_style=state_color,
+        box=box.DOUBLE,
+    ))
+    console.print()
 
 
 class CompletenessREPL:
@@ -37,89 +184,45 @@ class CompletenessREPL:
         self.current_workspace = None
         self.orchestrator = None
         self.running = False
+        self.history = InMemoryHistory()
     
-    def print_banner(self):
-        print(BANNER)
-        print(f"  Backend: {self.config.model.backend}")
-        print(f"  Model:   {self.config.model.name}")
-        print()
-        print("  Type 'help' for commands, 'quit' to exit")
-        print("=" * 80)
-        print()
-    
-    def format_time(self, seconds):
-        return str(timedelta(seconds=int(seconds)))
-    
-    def progress_bar(self, score, width=40):
-        filled = int(score / 100 * width)
-        bar = "#" * filled + "-" * (width - filled)
-        return f"[{bar}] {score}%"
-    
-    def print_cycle(self, result, elapsed):
-        print()
-        print(f"--- Cycle {result.cycle_number} Complete ---")
-        print(f"Score: {self.progress_bar(result.completeness_score)}")
-        print(f"Time:  {result.duration_seconds:.1f}s (total: {self.format_time(elapsed)})")
-        
-        if result.agent1_response:
-            print(f"Agent 1: {result.agent1_response.usage.total_tokens:,} tokens, {result.agent1_response.iterations} iterations")
-        
-        if result.agent2_review:
-            print(f"Agent 2: {result.agent2_review.usage.total_tokens:,} tokens")
-            
-            if result.agent2_review.completed_items:
-                print("  Completed:")
-                for item in result.agent2_review.completed_items[:3]:
-                    print(f"    + {item[:70]}")
-            
-            if result.agent2_review.remaining_work:
-                print("  Remaining:")
-                for item in result.agent2_review.remaining_work[:3]:
-                    print(f"    - {item[:70]}")
-        
-        if result.error:
-            print(f"  ERROR: {result.error}")
-        print()
-    
-    def print_status(self, msg):
-        ts = datetime.now().strftime("%H:%M:%S")
-        print(f"[{ts}] {msg}")
+    def get_prompt(self):
+        return HTML('<prompt>❯ </prompt>')
     
     def cmd_start(self, args):
         if len(args) < 2:
-            print("Usage: start <idea.md> <workspace>")
+            print_error("Usage: start <idea.md> <workspace>")
             return
         
         idea_path = Path(args[0]).resolve()
         workspace_path = Path(args[1]).resolve()
         
         if not idea_path.exists():
-            print(f"Error: Idea file not found: {idea_path}")
+            print_error(f"File not found: {idea_path}")
             return
         
         workspace_path.mkdir(parents=True, exist_ok=True)
         self.current_workspace = workspace_path
         
-        print()
-        print(f"Idea:      {idea_path}")
-        print(f"Workspace: {workspace_path}")
-        print()
+        console.print()
+        console.print(f"[{COLORS['muted']}]Idea:[/]      {idea_path}")
+        console.print(f"[{COLORS['muted']}]Workspace:[/] {workspace_path}")
+        console.print()
         
         self._run_loop(idea_path, workspace_path, resume=False)
     
     def cmd_resume(self, args):
-        if len(args) < 1:
-            if self.current_workspace:
-                workspace_path = self.current_workspace
-            else:
-                print("Usage: resume <workspace>")
-                return
-        else:
+        if args:
             workspace_path = Path(args[0]).resolve()
+        elif self.current_workspace:
+            workspace_path = self.current_workspace
+        else:
+            print_error("Usage: resume <workspace>")
+            return
         
         state_file = workspace_path / ".completeness_state.json"
         if not state_file.exists():
-            print(f"Error: No saved state in {workspace_path}")
+            print_error(f"No saved state in {workspace_path}")
             return
         
         idea_file = None
@@ -128,7 +231,7 @@ class CompletenessREPL:
             break
         
         if not idea_file:
-            print("Error: Cannot find idea file. Use 'start' instead.")
+            print_error("Cannot find idea file. Use 'start' instead.")
             return
         
         self._run_loop(idea_file, workspace_path, resume=True)
@@ -137,10 +240,11 @@ class CompletenessREPL:
         start_time = time.time()
         
         def on_cycle(result):
-            self.print_cycle(result, time.time() - start_time)
+            phase = self.orchestrator.state.phase if self.orchestrator else "implementation"
+            print_cycle_result(result, phase)
         
         def on_status(status):
-            self.print_status(status)
+            print_info(status)
         
         self.orchestrator = Orchestrator(
             workspace=workspace_path,
@@ -152,47 +256,36 @@ class CompletenessREPL:
         
         self.running = True
         action = "Resuming" if resume else "Starting"
-        self.print_status(f"{action} loop... (Ctrl+C to pause)")
-        print()
+        
+        console.print(Panel(
+            f"{action} autonomous loop... Press [bold]Ctrl+C[/] to pause",
+            border_style=COLORS["cyan"],
+            box=box.ROUNDED,
+        ))
+        console.print()
         
         try:
             self.orchestrator.run(resume=resume)
         except KeyboardInterrupt:
-            print()
-            self.print_status("Pausing...")
+            console.print()
+            print_info("Pausing loop...")
             self.orchestrator.pause()
         except Exception as e:
-            print(f"Error: {e}")
+            print_error(str(e))
         
         self.running = False
         status = self.orchestrator.get_status()
-        
-        print()
-        print("=" * 60)
-        print(f"Cycles:      {status['cycle_count']}")
-        print(f"Final Score: {self.progress_bar(status['current_score'])}")
-        print(f"Phase:       {status.get('phase', 'implementation')}")
-        print(f"Runtime:     {self.format_time(time.time() - start_time)}")
-        print(f"Tokens:      {status['total_tokens']:,}")
-        
-        if status['is_complete']:
-            print("Status:      COMPLETE")
-        elif status.get('is_paused'):
-            print("Status:      PAUSED (use 'resume' to continue)")
-        else:
-            print("Status:      STOPPED")
-        print("=" * 60)
-        print()
+        print_final_summary(status, time.time() - start_time)
     
     def cmd_status(self, args):
         workspace = Path(args[0]).resolve() if args else self.current_workspace
         if not workspace:
-            print("Usage: status <workspace>")
+            print_error("Usage: status <workspace>")
             return
         
         state_file = workspace / ".completeness_state.json"
         if not state_file.exists():
-            print("No session found.")
+            print_error("No session found.")
             return
         
         with open(state_file) as f:
@@ -201,24 +294,28 @@ class CompletenessREPL:
         history = state.get("completeness_history", [])
         latest_score = history[-1]["score"] if history else 0
         
-        print()
-        print(f"Workspace: {workspace}")
-        print(f"Cycles:    {state.get('cycle_count', 0)}")
-        print(f"Score:     {self.progress_bar(latest_score)}")
-        print(f"Phase:     {state.get('phase', 'implementation')}")
-        print(f"Complete:  {'Yes' if state.get('is_complete') else 'No'}")
-        print(f"Paused:    {'Yes' if state.get('is_paused') else 'No'}")
-        print()
+        content = Text()
+        content.append(f"Workspace: {workspace}\n", style=COLORS["muted"])
+        content.append("Score:     ")
+        content.append_text(progress_bar(latest_score))
+        content.append(f"\nPhase:     {state.get('phase', 'implementation')}")
+        content.append(f"\nCycles:    {state.get('cycle_count', 0)}")
+        content.append(f"\nComplete:  {'Yes' if state.get('is_complete') else 'No'}")
+        content.append(f"\nPaused:    {'Yes' if state.get('is_paused') else 'No'}")
+        
+        console.print()
+        console.print(Panel(content, title="Status", border_style=COLORS["primary"], box=box.ROUNDED))
+        console.print()
     
     def cmd_score(self, args):
         workspace = Path(args[0]).resolve() if args else self.current_workspace
         if not workspace:
-            print("Usage: score <workspace>")
+            print_error("Usage: score <workspace>")
             return
         
         state_file = workspace / ".completeness_state.json"
         if not state_file.exists():
-            print("No session found.")
+            print_error("No session found.")
             return
         
         with open(state_file) as f:
@@ -226,43 +323,58 @@ class CompletenessREPL:
         
         history = state.get("completeness_history", [])
         if not history:
-            print("No history yet.")
+            print_error("No history yet.")
             return
         
-        print()
-        print("Cycle | Score")
-        print("------+--------------------------------------------------")
+        console.print()
+        table = Table(title="Completeness History", box=box.ROUNDED, border_style=COLORS["primary"])
+        table.add_column("Cycle", style="bold", justify="right")
+        table.add_column("Score", justify="left")
+        table.add_column("Phase", style=COLORS["muted"])
+        
         for entry in history[-15:]:
-            cycle = entry.get("cycle", "?")
+            cycle = str(entry.get("cycle", "?"))
             score = entry.get("score", 0)
             phase = entry.get("phase", "impl")[:4]
-            bar = self.progress_bar(score, 35)
-            print(f"{cycle:>5} | {bar} [{phase}]")
-        print()
+            bar = progress_bar(score, 20)
+            table.add_row(cycle, bar, phase)
+        
+        console.print(table)
+        console.print()
     
     def cmd_backends(self, args):
-        print(list_backends())
+        console.print()
+        console.print(Panel(
+            list_backends(),
+            title="Available Backends",
+            border_style=COLORS["primary"],
+            box=box.ROUNDED,
+        ))
+        console.print()
     
     def cmd_config(self, args):
         output = Path(args[0]) if args else Path("config.yaml")
         self.config.save(output)
-        print(f"Config saved to {output}")
-    
-    def cmd_help(self, args):
-        print(HELP_TEXT)
+        print_success(f"Config saved to {output}")
     
     def run(self):
-        self.print_banner()
+        print_welcome()
+        print_config_info(self.config)
+        print_help()
         
         while True:
             try:
-                line = input("loop> ").strip()
+                line = prompt(
+                    self.get_prompt(),
+                    history=self.history,
+                    style=pt_style,
+                ).strip()
             except EOFError:
                 break
             except KeyboardInterrupt:
                 if self.running:
                     continue
-                print()
+                console.print()
                 break
             
             if not line:
@@ -287,12 +399,14 @@ class CompletenessREPL:
             elif cmd == "config":
                 self.cmd_config(args)
             elif cmd == "help":
-                self.cmd_help(args)
+                print_help()
             else:
-                print(f"Unknown command: {cmd}")
-                print("Type 'help' for available commands")
+                print_error(f"Unknown command: {cmd}")
+                console.print(f"[{COLORS['muted']}]Type 'help' for available commands[/]")
         
-        print("Goodbye!")
+        console.print()
+        console.print(f"[{COLORS['muted']}]Goodbye![/]")
+        console.print()
 
 
 def main():

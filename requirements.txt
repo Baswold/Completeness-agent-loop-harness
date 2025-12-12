@@ -12,3 +12,5 @@ pydantic
 pyyaml
 rich
 watchdog
+prompt_toolkit
+rich
