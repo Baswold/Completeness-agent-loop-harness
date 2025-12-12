@@ -373,6 +373,125 @@ class OpenAIBackend(LLMBackend):
             )
 
 
+class MistralBackend(LLMBackend):
+    """
+    Mistral API backend - OpenAI-compatible API
+    Default: https://api.mistral.ai/v1
+
+    Setup:
+        1. Get API key from https://console.mistral.ai/
+        2. Set environment variable: export MISTRAL_API_KEY="your-key"
+        3. Use model: devstral-small-2505 (recommended for coding)
+
+    Available models:
+        - devstral-small-2505: Fast, 24B parameter coding model (recommended)
+        - mistral-small-latest: General purpose 24B model
+        - mistral-large-latest: Powerful 123B equivalent model
+    """
+    def __init__(self, model: str = "devstral-small-2505"):
+        import os
+
+        api_key = os.environ.get("MISTRAL_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "MISTRAL_API_KEY environment variable not set.\n"
+                "Get your API key from https://console.mistral.ai/\n"
+                "Then run: export MISTRAL_API_KEY='your-key'"
+            )
+
+        self.model = model
+        self.api_key = api_key
+        self.base_url = "https://api.mistral.ai/v1"
+        self.client = httpx.Client(timeout=300.0)
+
+    def get_info(self) -> str:
+        return f"Mistral ({self.model}) @ {self.base_url}"
+
+    def supports_tools(self) -> bool:
+        return True
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict]] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        if tools:
+            payload["tools"] = tools
+
+        try:
+            response = self.client.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            usage_data = data.get("usage", {})
+
+            tool_calls = []
+            if "tool_calls" in message:
+                tool_calls = message.get("tool_calls", [])
+
+            return LLMResponse(
+                content=message.get("content", "") or "",
+                tool_calls=tool_calls,
+                usage=TokenUsage(
+                    prompt_tokens=usage_data.get("prompt_tokens", 0),
+                    completion_tokens=usage_data.get("completion_tokens", 0),
+                    total_tokens=usage_data.get("total_tokens", 0)
+                ),
+                finish_reason=choice.get("finish_reason", "stop")
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                return LLMResponse(
+                    content="Error: Invalid Mistral API key. Check your MISTRAL_API_KEY environment variable.",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+            elif e.response.status_code == 429:
+                return LLMResponse(
+                    content="Error: Rate limited by Mistral API. Please wait and retry.",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+            else:
+                return LLMResponse(
+                    content=f"Error: Mistral API returned status {e.response.status_code}",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+        except httpx.ConnectError:
+            return LLMResponse(
+                content="Error: Cannot connect to Mistral API. Check your internet connection.",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling Mistral API: {str(e)}",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+
+
 class OpenAICompatibleBackend(LLMBackend):
     """
     Generic OpenAI-compatible API backend.
@@ -456,6 +575,8 @@ BACKEND_ALIASES = {
     "mlx": "mlx",
     "openai": "openai",
     "gpt": "openai",
+    "mistral": "mistral",
+    "devstral": "mistral",
     "http": "http",
 }
 
@@ -469,31 +590,35 @@ DEFAULT_URLS = {
 def create_backend(config) -> LLMBackend:
     """
     Create an LLM backend based on configuration.
-    
+
     Supported backends:
+        - mistral: Mistral AI API (uses MISTRAL_API_KEY)
+        - openai: OpenAI API (uses Replit AI Integrations or OPENAI_API_KEY)
         - ollama: Ollama local server (default: localhost:11434)
         - lmstudio: LM Studio local server (default: localhost:1234)
         - mlx: Native Apple Silicon with mlx-lm
-        - openai: OpenAI API (uses Replit AI Integrations or OPENAI_API_KEY)
         - http: Any OpenAI-compatible API (requires base_url)
     """
     backend_type = config.model.backend.lower()
     backend_type = BACKEND_ALIASES.get(backend_type, backend_type)
-    
-    if backend_type == "ollama":
+
+    if backend_type == "mistral":
+        return MistralBackend(model=config.model.name)
+
+    elif backend_type == "ollama":
         base_url = config.model.base_url or DEFAULT_URLS["ollama"]
         return OllamaBackend(model=config.model.name, base_url=base_url)
-    
+
     elif backend_type == "lmstudio":
         base_url = config.model.base_url or DEFAULT_URLS["lmstudio"]
         return LMStudioBackend(model=config.model.name, base_url=base_url)
-    
+
     elif backend_type == "mlx":
         return MLXBackend(model=config.model.name)
-    
+
     elif backend_type == "openai":
         return OpenAIBackend(model=config.model.name)
-    
+
     elif backend_type == "http":
         if not config.model.base_url:
             raise ValueError("HTTP backend requires base_url in config")
@@ -501,11 +626,11 @@ def create_backend(config) -> LLMBackend:
             base_url=config.model.base_url,
             model=config.model.name
         )
-    
+
     else:
         raise ValueError(
             f"Unknown backend: {backend_type}\n"
-            f"Supported: ollama, lmstudio, mlx, openai, http"
+            f"Supported: mistral, openai, ollama, lmstudio, mlx, http"
         )
 
 
@@ -515,12 +640,20 @@ def list_backends() -> str:
 Available LLM Backends:
 =======================
 
-1. OpenAI (recommended for Replit)
+1. Mistral (RECOMMENDED - fast, affordable coding models)
+   Backend: mistral
+   Models: devstral-small-2505 (24B, recommended), mistral-large-latest, etc.
+   Setup:
+     1. Get API key from https://console.mistral.ai/
+     2. export MISTRAL_API_KEY="your-key"
+     3. Set in config: backend=mistral, name=devstral-small-2505
+
+2. OpenAI (great for Claude Code, Replit AI Integrations)
    Backend: openai
    Models: gpt-4o, gpt-4o-mini, gpt-4.1, o3-mini, etc.
    Uses Replit AI Integrations (no API key needed!)
 
-2. Ollama (local LLM server)
+3. Ollama (local LLM server)
    Backend: ollama
    Default URL: http://localhost:11434
    Setup:
@@ -528,7 +661,7 @@ Available LLM Backends:
      ollama pull devstral
      ollama serve
 
-3. LM Studio (great GUI, easy model management)
+4. LM Studio (great GUI, easy model management)
    Backend: lmstudio
    Default URL: http://localhost:1234
    Setup:
@@ -536,12 +669,12 @@ Available LLM Backends:
      2. Load a coding model (Devstral, CodeLlama, etc.)
      3. Start local server
 
-4. MLX (native Apple Silicon, fastest on Mac)
+5. MLX (native Apple Silicon, fastest on Mac)
    Backend: mlx
    Requires: pip install mlx-lm
    Note: Model downloaded automatically on first run
 
-5. HTTP (any OpenAI-compatible API)
+6. HTTP (any OpenAI-compatible API)
    Backend: http
    Requires: base_url in config
    Works with: vLLM, text-generation-inference, etc.

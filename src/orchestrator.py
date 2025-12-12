@@ -1,7 +1,7 @@
 import time
 import json
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, List
 from dataclasses import dataclass, field
 from datetime import datetime
 import subprocess
@@ -161,6 +161,191 @@ class Orchestrator:
             except Exception:
                 pass
         return False
+
+    def _execute_git_commit(self, commit_instructions: str):
+        """
+        Execute git commit based on Agent 2's instructions.
+        
+        This implements the automatic commit strategy where Agent 2 specifies
+        exactly what should be committed, and Agent 1 executes it.
+        
+        Includes commit message sanitization to prevent Agent 1 bias by:
+        1. Removing subjective claims of completeness
+        2. Focusing on factual changes only
+        3. Standardizing commit message format
+        """
+        if not commit_instructions:
+            return
+            
+        try:
+            # Parse commit instructions to extract files and message
+            lines = commit_instructions.split('\n')
+            files_to_add = []
+            commit_message = ""
+            
+            in_commit_section = False
+            for line in lines:
+                if line.startswith('git add'):
+                    # Extract files from git add command
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        files_to_add.extend(parts[2:])
+                elif line.startswith('git commit'):
+                    in_commit_section = True
+                elif in_commit_section and ('-m "' in line or '-m \"' in line):
+                    # Extract commit message (handle both single and double quotes)
+                    if '-m "' in line:
+                        message_start = line.find('"') + 1
+                        # Look for closing quote in subsequent lines
+                        commit_message = line[message_start:]
+                        i = lines.index(line) + 1
+                        while i < len(lines) and '"' not in lines[i]:
+                            commit_message += '\n' + lines[i]
+                            i += 1
+                        if i < len(lines):
+                            commit_message += lines[i][:lines[i].find('"')]
+                    elif "-m \"" in line:
+                        message_start = line.find("\"") + 1
+                        # Look for closing quote in subsequent lines
+                        commit_message = line[message_start:]
+                        i = lines.index(line) + 1
+                        while i < len(lines) and "\"" not in lines[i]:
+                            commit_message += '\n' + lines[i]
+                            i += 1
+                        if i < len(lines):
+                            commit_message += lines[i][:lines[i].find("\"")]
+                    break
+            
+            if not files_to_add:
+                # Default to adding all changes
+                files_to_add = ['.']
+            
+            if commit_message:
+                # COMMIT MESSAGE SANITIZATION: Remove Agent 1 bias
+                sanitized_message = self._sanitize_commit_message(commit_message)
+                
+                # Execute git add
+                for file_path in files_to_add:
+                    self.tools.execute('git_add', {'paths': [file_path]})
+                
+                # Execute git commit with sanitized message
+                result = self.tools.execute('git_commit', {'message': sanitized_message})
+                
+                if result.success:
+                    self._update_status(f"Git commit executed: {sanitized_message[:50]}...")
+                else:
+                    self._update_status(f"Git commit failed: {result.error}")
+                    
+        except Exception as e:
+            self._update_status(f"Error executing git commit: {str(e)}")
+
+    def _sanitize_commit_message(self, message: str) -> str:
+        """
+        Sanitize commit message to remove Agent 1 bias and subjective claims.
+        
+        This prevents Agent 1 from influencing Agent 2 through commit messages
+        by removing claims like "fully implemented" or "complete" that might
+        not be accurate.
+        """
+        # Remove subjective claims of completeness (case insensitive)
+        import re
+        bias_phrases = [
+            r'fully implemented', r'completely implemented', r'fully complete',
+            r'comprehensive', r'thorough', r'complete solution', r'perfect',
+            r'all edge cases', r'all requirements', r'everything working',
+            r'production ready', r'fully tested', r'comprehensive testing'
+        ]
+        
+        sanitized = message
+        for phrase in bias_phrases:
+            sanitized = re.sub(phrase, '', sanitized, flags=re.IGNORECASE)
+        
+        # Remove multiple spaces and clean up
+        sanitized = ' '.join(sanitized.split())
+        
+        # Ensure message is not empty after sanitization
+        if not sanitized.strip():
+            sanitized = "Auto-commit: code changes"
+        
+        # Add completeness score from state if available
+        if self.state.completeness_history:
+            latest_score = self.state.completeness_history[-1]["score"]
+            sanitized = f"[{self.state.phase}] {sanitized}\
+\nCompleteness: {latest_score}%"
+        
+        return sanitized
+
+    def _run_tests_before_commit(self) -> Optional[str]:
+        """
+        Run tests before committing to ensure code quality.
+        Returns test results if tests exist, None otherwise.
+        """
+        try:
+            # Use the context builder to run tests
+            test_results = self.context_builder.run_tests()
+            
+            if test_results and "No tests found" not in test_results:
+                # Log test results
+                test_summary = self._analyze_test_results(test_results)
+                self._update_status(f"Tests run: {test_summary}")
+                return test_results
+            else:
+                self._update_status("No tests found - proceeding without test verification")
+                return None
+                
+        except Exception as e:
+            self._update_status(f"Test execution failed: {str(e)}")
+            return None
+
+    def _analyze_test_results(self, test_results: str) -> str:
+        """
+        Analyze test results to determine pass/fail status.
+        """
+        lines = test_results.lower()
+        
+        if "passed" in lines and "failed" in lines:
+            # Try to extract numbers
+            import re
+            passed_match = re.search(r'(\d+) passed', lines)
+            failed_match = re.search(r'(\d+) failed', lines)
+            
+            if passed_match and failed_match:
+                passed = int(passed_match.group(1))
+                failed = int(failed_match.group(1))
+                return f"{passed} passed, {failed} failed"
+        
+        elif "passed" in lines:
+            return "All tests passed"
+        elif "failed" in lines or "error" in lines:
+            return "Tests failed"
+        
+        return "Tests executed"
+
+    def _should_commit_based_on_tests(self, test_results: str, review: ReviewResult) -> bool:
+        """
+        Decide whether to commit based on test results and current phase.
+        
+        Strategy:
+        - In testing phase: Always commit (Agent 2 will review test failures)
+        - In implementation phase: Only commit if tests pass or no tests exist
+        """
+        if self.state.phase == "testing":
+            # In testing phase, always commit so Agent 2 can review test failures
+            return True
+        
+        # In implementation phase, check if tests pass
+        lines = test_results.lower()
+        
+        # If tests explicitly passed, commit
+        if ("passed" in lines and "failed" not in lines) or "all tests passed" in lines:
+            return True
+        
+        # If tests failed, don't commit
+        if "failed" in lines or "error" in lines:
+            return False
+        
+        # If unclear, commit anyway (better to have Agent 2 review)
+        return True
     
     def _init_git(self):
         git_dir = self.workspace / ".git"
@@ -216,13 +401,29 @@ Begin implementation now.
             )
             self.state.total_agent1_usage = self.state.total_agent1_usage + agent1_response.usage
         except Exception as e:
+            error_msg = f"Agent 1 error: {str(e)}"
+            self._update_status(error_msg)
+            
+            # Add error to state for recovery
+            self.state.last_review = ReviewResult(
+                raw_content=f"Error occurred: {str(e)}",
+                completeness_score=self.state.completeness_history[-1]["score"] if self.state.completeness_history else 0,
+                completed_items=[],
+                remaining_work=[f"Recover from error: {str(e)}"],
+                issues_found=[f"Agent 1 failed: {str(e)}"],
+                commit_instructions="",
+                next_instructions=f"Agent 1 encountered an error: {str(e)}. Please try to recover and continue the task.",
+                usage=TokenUsage(),
+                is_complete=False
+            )
+            
             return CycleResult(
                 cycle_number=cycle_num,
                 agent1_response=None,
-                agent2_review=None,
-                completeness_score=0,
+                agent2_review=self.state.last_review,
+                completeness_score=self.state.last_review.completeness_score,
                 is_complete=False,
-                error=f"Agent 1 error: {str(e)}",
+                error=error_msg,
                 duration_seconds=time.time() - cycle_start
             )
         
@@ -249,13 +450,31 @@ Begin implementation now.
             self.state.total_agent2_usage = self.state.total_agent2_usage + review.usage
             self.state.last_review = review
         except Exception as e:
+            error_msg = f"Agent 2 error: {str(e)}"
+            self._update_status(error_msg)
+            
+            # Create fallback review to continue progress
+            fallback_review = ReviewResult(
+                raw_content=f"Agent 2 review failed: {str(e)}",
+                completeness_score=self.state.completeness_history[-1]["score"] if self.state.completeness_history else 0,
+                completed_items=[],
+                remaining_work=["Continue implementation - Agent 2 review failed"],
+                issues_found=[f"Review failed: {str(e)}"],
+                commit_instructions="",
+                next_instructions="Agent 2 encountered an error. Continue with the current task based on the original specification.",
+                usage=TokenUsage(),
+                is_complete=False
+            )
+            
+            self.state.last_review = fallback_review
+            
             return CycleResult(
                 cycle_number=cycle_num,
                 agent1_response=agent1_response,
-                agent2_review=None,
-                completeness_score=0,
+                agent2_review=fallback_review,
+                completeness_score=fallback_review.completeness_score,
                 is_complete=False,
-                error=f"Agent 2 error: {str(e)}",
+                error=error_msg,
                 duration_seconds=time.time() - cycle_start
             )
         
@@ -266,6 +485,21 @@ Begin implementation now.
             "phase": self.state.phase
         })
         
+        # Execute git commit if Agent 2 provided instructions
+        # But first, run tests to ensure changes don't break anything
+        test_results = self._run_tests_before_commit()
+        
+        if test_results:
+            # Only commit if tests pass or if this is the testing phase
+            should_commit = self._should_commit_based_on_tests(test_results, review)
+            if should_commit:
+                self._execute_git_commit(review.commit_instructions)
+            else:
+                self._update_status("Skipping commit: tests are failing")
+        else:
+            # No tests found, proceed with commit
+            self._execute_git_commit(review.commit_instructions)
+
         # Phase transition: switch to testing phase when threshold is reached
         if self.state.phase == "implementation" and review.completeness_score >= self.testing_threshold:
             self.state.phase = "testing"
@@ -301,6 +535,9 @@ Begin implementation now.
         
         max_iterations = self.config.limits.max_iterations
         max_runtime = self.config.limits.max_runtime_hours * 3600
+
+        max_consecutive_errors = 3  # Stop after 3 consecutive errors
+        consecutive_errors = 0
         
         while not self.state.is_complete and not self.state.is_paused:
             if self.state.cycle_count >= max_iterations:
@@ -315,8 +552,17 @@ Begin implementation now.
             result = self.run_cycle()
             
             if result.error:
+                consecutive_errors += 1
                 self._update_status(f"Error in cycle {result.cycle_number}: {result.error}")
+                
+                if consecutive_errors >= max_consecutive_errors:
+                    self._update_status(f"Stopping after {max_consecutive_errors} consecutive errors")
+                    break
+                
+                # Short delay before retry
                 time.sleep(5)
+            else:
+                consecutive_errors = 0  # Reset error counter on success
         
         self._save_state()
         return self.state
