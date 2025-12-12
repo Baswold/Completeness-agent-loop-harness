@@ -36,3 +36,8 @@ workspaces/
 workspace/
 sandbox/
 .local/
+
+# Replit-specific
+.replit
+start/
+attached_assets/
