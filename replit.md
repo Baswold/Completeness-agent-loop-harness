@@ -37,25 +37,47 @@ main.py               # Entry point
 
 ## Usage
 
+### Quick Start (Zero-Config)
 ```bash
-# Start a new task
-python main.py start --idea ./my-project-idea.md --workspace ./sandbox
+# 1. Create a folder with your project idea
+mkdir my-project && cd my-project
 
-# Resume interrupted task
-python main.py start --idea ./idea.md --workspace ./sandbox --resume
+# 2. Write your specification
+cat > idea.md << 'EOF'
+# My Todo App
+Build a command-line todo list manager with:
+- Add, remove, complete tasks
+- Save to JSON file
+- List all tasks with status
+EOF
 
-# Check status
-python main.py status --workspace ./sandbox
+# 3. Run the agent
+python /path/to/completeness-loop/main.py
 
-# View score history
-python main.py score --workspace ./sandbox
-
-# Show available LLM backends
-python main.py backends
-
-# Generate config file
-python main.py init-config --output config.yaml
+# 4. Type 'go' and watch it build!
 ```
+
+### Interactive Commands
+```
+❯ go          Start building (auto-detects idea.md, sets up workspace + git)
+❯ resume      Resume a paused session
+❯ status      Show current progress
+❯ history     Show completeness score history
+❯ backends    List available LLM backends
+❯ config      Generate config.yaml
+❯ help        Show help
+❯ quit        Exit
+```
+
+### How It Works
+1. Place an `idea.md` file in any folder describing your project
+2. Run the CLI from that folder
+3. Type `go` - the agent will:
+   - Create a `workspace/` directory
+   - Initialize git repository
+   - Copy your spec into the workspace
+   - Start Agent 1 with prompt: "Build the complete project described in @idea.md"
+   - Iterate until complete (or press Ctrl+C to pause)
 
 ## Configuration
 Supports YAML config for:
