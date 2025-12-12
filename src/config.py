@@ -34,11 +34,20 @@ class MonitoringConfig(BaseModel):
     log_file: Optional[str] = "completeness_loop.log"
 
 
+class FeaturesConfig(BaseModel):
+    """Optional features that can be enabled/disabled."""
+    refinement_mode: bool = False  # Allow agents to refine/polish code after implementation
+    interactive_approval: bool = False  # Ask user to approve changes before committing
+    verbose_logging: bool = False  # More detailed logging during execution
+    auto_fix_tests: bool = True  # Try to fix test failures automatically
+
+
 class LoopConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig)
     
     @classmethod
     def load(cls, path: Path) -> "LoopConfig":
