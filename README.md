@@ -16,11 +16,16 @@ A production-grade autonomous coding agent system that uses multi-agent verifica
 - Block access attempts to system directories
 
 🚀 **Multiple LLM Backends**
-- **Anthropic Claude** (recommended for complex tasks)
-- **OpenAI** (gpt-4o, gpt-4o-mini, etc.)
-- **Mistral** (fast, affordable Devstral models)
-- **Local options**: Ollama, LM Studio, MLX (native Apple Silicon)
-- **Custom APIs**: OpenAI-compatible endpoint support
+- **API Backends**:
+  - **Anthropic Claude** (recommended for complex tasks)
+  - **OpenAI** (gpt-4o, gpt-4o-mini, etc.)
+  - **Mistral** (fast, affordable Devstral models)
+  - **Local options**: Ollama, LM Studio, MLX (native Apple Silicon)
+  - **Custom APIs**: OpenAI-compatible endpoint support
+- **CLI Backends** (⚠️ use subscription credits):
+  - **Claude Code CLI** (Anthropic Pro/Plus)
+  - **Codex CLI** (ChatGPT Pro/Plus)
+  - **Gemini CLI** (Google AI Studio)
 
 📦 **Production Features**
 - Persistent progress tracking with `.completeness_state.json`
@@ -76,12 +81,36 @@ completeness-loop
 
 ## Supported Backends
 
+### API Backends (Recommended)
 - **Anthropic Claude** (claude-3-5-sonnet-20241022 recommended)
 - **OpenAI** (gpt-4o, gpt-4o-mini)
 - **Mistral** (devstral-small-2505)
 - **Ollama** (local)
 - **LM Studio** (local with GUI)
 - **MLX** (Apple Silicon native)
+
+### CLI Backends (⚠️ Uses Subscription Credits)
+**WARNING**: CLI backends consume Pro/Plus subscription credits VERY QUICKLY during autonomous agent loops!
+
+- **Claude Code CLI** - Uses Anthropic Pro/Plus subscription
+  - Install: https://claude.com/code
+  - Models: sonnet, opus, haiku
+  - Setup: `claude auth`
+
+- **OpenAI Codex CLI** - Uses ChatGPT Pro/Plus subscription
+  - Install: `npm i -g @openai/codex` or `brew install codex`
+  - Models: gpt-5-codex, gpt-5, gpt-4o
+  - Setup: Run `codex` to authenticate
+
+- **Google Gemini CLI** - Uses AI Studio credits
+  - Install: https://github.com/google-gemini/gemini-cli
+  - Models: gemini-2.5-flash, gemini-2.5-pro
+  - Setup: `gemini auth`
+
+**Only use CLI backends if you:**
+- Have an active Pro/Plus subscription
+- Understand the cost implications
+- Are monitoring your usage closely
 
 ## Key Improvements (v1.0.0)
 

@@ -1,5 +1,7 @@
 import json
 import httpx
+import subprocess
+import shlex
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Callable
@@ -584,6 +586,411 @@ class AnthropicBackend(LLMBackend):
             )
 
 
+class ClaudeCodeCLIBackend(LLMBackend):
+    """
+    Claude Code CLI backend - uses the 'claude' command-line interface.
+
+    ⚠️  WARNING: This backend uses your Anthropic Pro subscription!
+    CLI usage can consume credits VERY QUICKLY during autonomous agent loops.
+
+    Setup:
+        1. Install Claude Code CLI from https://claude.com/code
+        2. Authenticate: claude auth
+        3. Configure model: claude --model sonnet (or opus, haiku)
+
+    Features:
+        - Runs in headless mode with -p flag
+        - Auto-approves tools with --dangerously-skip-permissions
+        - Model selection via --model flag
+        - Uses Claude Pro/Plus subscription credits
+
+    Models:
+        - sonnet (claude-sonnet-4-5): Recommended for complex tasks
+        - opus (claude-opus-4-5): Most capable model
+        - haiku (claude-haiku-4-5): Fast, lightweight (3x cost savings)
+    """
+    def __init__(self, model: str = "sonnet"):
+        self.model = model
+        self._warned = False
+
+    def get_info(self) -> str:
+        return f"Claude Code CLI ({self.model}) ⚠️ USES SUBSCRIPTION CREDITS"
+
+    def supports_tools(self) -> bool:
+        # CLI mode doesn't support structured tool calls in the same way
+        # The agent will need to work with the CLI's natural responses
+        return False
+
+    def _show_warning(self):
+        """Show usage warning once per session."""
+        if not self._warned:
+            print("\n" + "="*80)
+            print("⚠️  WARNING: CLAUDE CODE CLI BACKEND ACTIVE")
+            print("="*80)
+            print("This backend uses your Anthropic Pro/Plus subscription!")
+            print("Autonomous agent loops can consume credits VERY QUICKLY.")
+            print("Monitor your usage at: https://console.anthropic.com/")
+            print("="*80 + "\n")
+            self._warned = True
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict]] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        self._show_warning()
+
+        try:
+            # Combine messages into a single prompt
+            # System messages become part of the context
+            prompt_parts = []
+            for msg in messages:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt_parts.append(f"SYSTEM CONTEXT:\n{content}\n")
+                elif role == "user":
+                    prompt_parts.append(f"USER:\n{content}\n")
+                elif role == "assistant":
+                    prompt_parts.append(f"ASSISTANT:\n{content}\n")
+
+            full_prompt = "\n".join(prompt_parts)
+
+            # Build command
+            cmd = [
+                "claude",
+                "-p", full_prompt,
+                "--model", self.model,
+                "--dangerously-skip-permissions"
+            ]
+
+            # Run command
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr or "Unknown error running claude CLI"
+                return LLMResponse(
+                    content=f"Error running claude CLI: {error_msg}",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+
+            # Extract output
+            output = result.stdout.strip()
+
+            # Estimate token usage (very rough approximation)
+            # ~4 characters per token
+            prompt_tokens = len(full_prompt) // 4
+            completion_tokens = len(output) // 4
+
+            return LLMResponse(
+                content=output,
+                tool_calls=[],
+                usage=TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens
+                ),
+                finish_reason="stop"
+            )
+
+        except subprocess.TimeoutExpired:
+            return LLMResponse(
+                content="Error: claude CLI command timed out after 10 minutes",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except FileNotFoundError:
+            return LLMResponse(
+                content="Error: 'claude' command not found. Install Claude Code CLI from https://claude.com/code",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling claude CLI: {str(e)}",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+
+
+class CodexCLIBackend(LLMBackend):
+    """
+    OpenAI Codex CLI backend - uses the 'codex' command-line interface.
+
+    ⚠️  WARNING: This backend uses your ChatGPT Pro/Plus subscription!
+    CLI usage can consume credits VERY QUICKLY during autonomous agent loops.
+
+    Setup:
+        1. Install: npm i -g @openai/codex  OR  brew install codex
+        2. Authenticate: codex (first run will prompt for login)
+        3. Configure approvals: Use /approvals command in interactive mode
+
+    Features:
+        - Uses ChatGPT Pro, Plus, Business, or Enterprise subscription
+        - Supports GPT-5-Codex and GPT-5 models
+        - Model selection via -m flag or /model command
+
+    Models:
+        - gpt-5-codex (default): Optimized for agentic software engineering
+        - gpt-5: Latest flagship model
+        - gpt-4o: Previous generation (still available)
+    """
+    def __init__(self, model: str = "gpt-5-codex"):
+        self.model = model
+        self._warned = False
+
+    def get_info(self) -> str:
+        return f"Codex CLI ({self.model}) ⚠️ USES SUBSCRIPTION CREDITS"
+
+    def supports_tools(self) -> bool:
+        return False
+
+    def _show_warning(self):
+        """Show usage warning once per session."""
+        if not self._warned:
+            print("\n" + "="*80)
+            print("⚠️  WARNING: CODEX CLI BACKEND ACTIVE")
+            print("="*80)
+            print("This backend uses your ChatGPT Pro/Plus subscription!")
+            print("Autonomous agent loops can consume credits VERY QUICKLY.")
+            print("Monitor your usage in your ChatGPT account settings.")
+            print("="*80 + "\n")
+            self._warned = True
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict]] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        self._show_warning()
+
+        try:
+            # Combine messages into a prompt
+            prompt_parts = []
+            for msg in messages:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt_parts.append(f"SYSTEM CONTEXT:\n{content}\n")
+                elif role == "user":
+                    prompt_parts.append(f"USER:\n{content}\n")
+                elif role == "assistant":
+                    prompt_parts.append(f"ASSISTANT:\n{content}\n")
+
+            full_prompt = "\n".join(prompt_parts)
+
+            # Create a temporary file with the prompt
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                f.write(full_prompt)
+                prompt_file = f.name
+
+            try:
+                # Build command - pipe the prompt to codex
+                # Using echo with heredoc to provide input
+                cmd = f"cat {shlex.quote(prompt_file)} | codex -m {shlex.quote(self.model)}"
+
+                # Run command via shell (needed for piping)
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+
+                if result.returncode != 0:
+                    error_msg = result.stderr or "Unknown error running codex CLI"
+                    return LLMResponse(
+                        content=f"Error running codex CLI: {error_msg}",
+                        usage=TokenUsage(),
+                        finish_reason="error"
+                    )
+
+                output = result.stdout.strip()
+
+                # Estimate tokens
+                prompt_tokens = len(full_prompt) // 4
+                completion_tokens = len(output) // 4
+
+                return LLMResponse(
+                    content=output,
+                    tool_calls=[],
+                    usage=TokenUsage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens
+                    ),
+                    finish_reason="stop"
+                )
+            finally:
+                # Clean up temp file
+                import os
+                try:
+                    os.unlink(prompt_file)
+                except:
+                    pass
+
+        except subprocess.TimeoutExpired:
+            return LLMResponse(
+                content="Error: codex CLI command timed out after 10 minutes",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except FileNotFoundError:
+            return LLMResponse(
+                content="Error: 'codex' command not found. Install with: npm i -g @openai/codex OR brew install codex",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling codex CLI: {str(e)}",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+
+
+class GeminiCLIBackend(LLMBackend):
+    """
+    Google Gemini CLI backend - uses the 'gemini' command-line interface.
+
+    ⚠️  WARNING: This backend uses your Google AI Studio / Vertex AI credits!
+    CLI usage can consume credits VERY QUICKLY during autonomous agent loops.
+
+    Setup:
+        1. Install from https://github.com/google-gemini/gemini-cli
+        2. Authenticate: gemini auth (will use Google account)
+        3. Optional: Set default model with GEMINI_MODEL env var
+
+    Features:
+        - Runs in headless mode with -p flag
+        - Auto-approves with --yolo flag (skips confirmations)
+        - Model selection via --model flag
+        - Supports Gemini 2.5 Flash, Pro, and Gemini 3 models
+
+    Models:
+        - gemini-2.5-flash: Fast, efficient (default)
+        - gemini-2.5-pro: More capable for complex tasks
+        - gemini-3-pro: Latest model (requires preview features)
+    """
+    def __init__(self, model: str = "gemini-2.5-flash"):
+        self.model = model
+        self._warned = False
+
+    def get_info(self) -> str:
+        return f"Gemini CLI ({self.model}) ⚠️ USES API CREDITS"
+
+    def supports_tools(self) -> bool:
+        return False
+
+    def _show_warning(self):
+        """Show usage warning once per session."""
+        if not self._warned:
+            print("\n" + "="*80)
+            print("⚠️  WARNING: GEMINI CLI BACKEND ACTIVE")
+            print("="*80)
+            print("This backend uses your Google AI Studio / Vertex AI credits!")
+            print("Autonomous agent loops can consume credits VERY QUICKLY.")
+            print("Monitor your usage at: https://aistudio.google.com/")
+            print("="*80 + "\n")
+            self._warned = True
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict]] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        self._show_warning()
+
+        try:
+            # Combine messages
+            prompt_parts = []
+            for msg in messages:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt_parts.append(f"SYSTEM CONTEXT:\n{content}\n")
+                elif role == "user":
+                    prompt_parts.append(f"USER:\n{content}\n")
+                elif role == "assistant":
+                    prompt_parts.append(f"ASSISTANT:\n{content}\n")
+
+            full_prompt = "\n".join(prompt_parts)
+
+            # Build command
+            cmd = [
+                "gemini",
+                "-p", full_prompt,
+                "--model", self.model,
+                "--yolo"  # Skip confirmations for automation
+            ]
+
+            # Run command
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr or "Unknown error running gemini CLI"
+                return LLMResponse(
+                    content=f"Error running gemini CLI: {error_msg}",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+
+            output = result.stdout.strip()
+
+            # Estimate tokens
+            prompt_tokens = len(full_prompt) // 4
+            completion_tokens = len(output) // 4
+
+            return LLMResponse(
+                content=output,
+                tool_calls=[],
+                usage=TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens
+                ),
+                finish_reason="stop"
+            )
+
+        except subprocess.TimeoutExpired:
+            return LLMResponse(
+                content="Error: gemini CLI command timed out after 10 minutes",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except FileNotFoundError:
+            return LLMResponse(
+                content="Error: 'gemini' command not found. Install from https://github.com/google-gemini/gemini-cli",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling gemini CLI: {str(e)}",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+
+
 class OpenAICompatibleBackend(LLMBackend):
     """
     Generic OpenAI-compatible API backend.
@@ -672,6 +1079,16 @@ BACKEND_ALIASES = {
     "mistral": "mistral",
     "devstral": "mistral",
     "http": "http",
+    # CLI backends
+    "claude-cli": "claude-cli",
+    "claude_cli": "claude-cli",
+    "claudecode": "claude-cli",
+    "claude-code": "claude-cli",
+    "codex": "codex",
+    "codex-cli": "codex",
+    "openai-cli": "codex",
+    "gemini": "gemini",
+    "gemini-cli": "gemini",
 }
 
 # Default URLs for each backend
@@ -686,6 +1103,7 @@ def create_backend(config) -> LLMBackend:
     Create an LLM backend based on configuration.
 
     Supported backends:
+        API Backends:
         - anthropic: Anthropic Claude API (uses ANTHROPIC_API_KEY)
         - mistral: Mistral AI API (uses MISTRAL_API_KEY)
         - openai: OpenAI API (uses Replit AI Integrations or OPENAI_API_KEY)
@@ -693,10 +1111,16 @@ def create_backend(config) -> LLMBackend:
         - lmstudio: LM Studio local server (default: localhost:1234)
         - mlx: Native Apple Silicon with mlx-lm
         - http: Any OpenAI-compatible API (requires base_url)
+
+        CLI Backends (use subscription credits):
+        - claude-cli: Claude Code CLI (uses Claude Pro/Plus subscription)
+        - codex: OpenAI Codex CLI (uses ChatGPT Pro/Plus subscription)
+        - gemini: Google Gemini CLI (uses AI Studio credits)
     """
     backend_type = config.model.backend.lower()
     backend_type = BACKEND_ALIASES.get(backend_type, backend_type)
 
+    # API backends
     if backend_type == "anthropic":
         return AnthropicBackend(model=config.model.name)
 
@@ -725,10 +1149,21 @@ def create_backend(config) -> LLMBackend:
             model=config.model.name
         )
 
+    # CLI backends
+    elif backend_type == "claude-cli":
+        return ClaudeCodeCLIBackend(model=config.model.name)
+
+    elif backend_type == "codex":
+        return CodexCLIBackend(model=config.model.name)
+
+    elif backend_type == "gemini":
+        return GeminiCLIBackend(model=config.model.name)
+
     else:
         raise ValueError(
             f"Unknown backend: {backend_type}\n"
-            f"Supported: anthropic, mistral, openai, ollama, lmstudio, mlx, http"
+            f"Supported API backends: anthropic, mistral, openai, ollama, lmstudio, mlx, http\n"
+            f"Supported CLI backends: claude-cli, codex, gemini"
         )
 
 
@@ -737,6 +1172,9 @@ def list_backends() -> str:
     return """
 Available LLM Backends:
 =======================
+
+API BACKENDS (use API keys):
+-----------------------------
 
 1. Anthropic Claude (best for complex tasks)
    Backend: anthropic
@@ -784,4 +1222,53 @@ Available LLM Backends:
    Backend: http
    Requires: base_url in config
    Works with: vLLM, text-generation-inference, etc.
+
+CLI BACKENDS (use subscription credits):
+-----------------------------------------
+⚠️  WARNING: These backends use your Pro/Plus subscriptions!
+⚠️  Autonomous agent loops can consume credits VERY QUICKLY!
+⚠️  Only use CLI backends if you understand the cost implications!
+
+8. Claude Code CLI (Anthropic Pro/Plus subscription)
+   Backend: claude-cli
+   Models: sonnet (recommended), opus, haiku
+   Setup:
+     1. Install from https://claude.com/code
+     2. claude auth
+     3. Set in config: backend=claude-cli, name=sonnet
+   Features:
+     - Uses -p flag for headless mode
+     - Auto-approves tools with --dangerously-skip-permissions
+     - Monitor usage: https://console.anthropic.com/
+
+9. OpenAI Codex CLI (ChatGPT Pro/Plus subscription)
+   Backend: codex
+   Models: gpt-5-codex (recommended), gpt-5, gpt-4o
+   Setup:
+     1. Install: npm i -g @openai/codex OR brew install codex
+     2. codex (authenticate on first run)
+     3. Set in config: backend=codex, name=gpt-5-codex
+   Features:
+     - Uses ChatGPT Pro/Plus/Business subscription
+     - Monitor usage in ChatGPT account settings
+
+10. Google Gemini CLI (AI Studio credits)
+    Backend: gemini
+    Models: gemini-2.5-flash (recommended), gemini-2.5-pro, gemini-3-pro
+    Setup:
+      1. Install from https://github.com/google-gemini/gemini-cli
+      2. gemini auth
+      3. Set in config: backend=gemini, name=gemini-2.5-flash
+    Features:
+      - Uses -p flag for headless mode
+      - Auto-approves with --yolo flag
+      - Monitor usage: https://aistudio.google.com/
+
+CHOOSING A BACKEND:
+-------------------
+- For API usage: Use 'anthropic', 'mistral', or 'openai' for production
+- For local development: Use 'ollama' or 'lmstudio'
+- For Mac users: 'mlx' offers native Apple Silicon performance
+- For CLI (Pro subscriptions): Use 'claude-cli', 'codex', or 'gemini'
+  BUT BE AWARE: CLI usage will consume your subscription credits rapidly!
 """

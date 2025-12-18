@@ -38,11 +38,19 @@ completeness_loop_config:
 # CONFIGURATION REFERENCE
 # =============================================================================
 #
-# MODEL BACKENDS:
+# API BACKENDS:
 #   ollama    - Local LLM server (brew install ollama && ollama pull devstral)
 #   lmstudio  - LM Studio GUI (https://lmstudio.ai)
 #   mlx       - Native Apple Silicon (pip install mlx-lm)
-#   openai    - Any OpenAI-compatible API (set base_url)
+#   openai    - OpenAI API (uses OPENAI_API_KEY)
+#   anthropic - Anthropic Claude API (uses ANTHROPIC_API_KEY)
+#   mistral   - Mistral AI API (uses MISTRAL_API_KEY)
+#   http      - Any OpenAI-compatible API (set base_url)
+#
+# CLI BACKENDS (⚠️ USE SUBSCRIPTION CREDITS - CONSUMES FAST!):
+#   claude-cli - Claude Code CLI (needs Claude Pro/Plus subscription)
+#   codex      - OpenAI Codex CLI (needs ChatGPT Pro/Plus subscription)
+#   gemini     - Google Gemini CLI (needs AI Studio credits)
 #
 # AGENT2 DUAL PROMPTS:
 #   The system uses TWO different prompts for Agent 2:
@@ -64,3 +72,52 @@ completeness_loop_config:
 #   agent1_system_prompt: "prompts/agent1_system.txt"
 #   agent2_implementation_prompt: "prompts/agent2_implementation.txt"
 #   agent2_testing_prompt: "prompts/agent2_testing.txt"
+#
+# =============================================================================
+# EXAMPLE CONFIGURATIONS FOR DIFFERENT BACKENDS
+# =============================================================================
+#
+# Example 1: Claude Code CLI (uses Pro/Plus subscription)
+# ⚠️ WARNING: This will consume your Anthropic subscription credits!
+# model:
+#   backend: "claude-cli"
+#   name: "sonnet"              # Options: sonnet, opus, haiku
+#   max_tokens: 4096
+#   temperature: 0.7
+#
+# Example 2: OpenAI Codex CLI (uses ChatGPT subscription)
+# ⚠️ WARNING: This will consume your ChatGPT subscription credits!
+# model:
+#   backend: "codex"
+#   name: "gpt-5-codex"         # Options: gpt-5-codex, gpt-5, gpt-4o
+#   max_tokens: 4096
+#   temperature: 0.7
+#
+# Example 3: Google Gemini CLI (uses AI Studio credits)
+# ⚠️ WARNING: This will consume your Google AI Studio credits!
+# model:
+#   backend: "gemini"
+#   name: "gemini-2.5-flash"    # Options: gemini-2.5-flash, gemini-2.5-pro
+#   max_tokens: 4096
+#   temperature: 0.7
+#
+# Example 4: Anthropic API (recommended for production)
+# model:
+#   backend: "anthropic"
+#   name: "claude-3-5-sonnet-20241022"
+#   max_tokens: 4096
+#   temperature: 0.7
+#
+# Example 5: OpenAI API
+# model:
+#   backend: "openai"
+#   name: "gpt-4o"
+#   max_tokens: 4096
+#   temperature: 0.7
+#
+# Example 6: Mistral API (fast and affordable)
+# model:
+#   backend: "mistral"
+#   name: "devstral-small-2505"
+#   max_tokens: 4096
+#   temperature: 0.7

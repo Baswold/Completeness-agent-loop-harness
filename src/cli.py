@@ -361,7 +361,8 @@ class CompletenessREPL:
                 print_success(f"Workspace: {self.workspace}")
             
             elif choice == "3":
-                console.print(f"  [{COLORS['muted']}]Available: anthropic, ollama, lmstudio, mlx, openai, mistral[/]")
+                console.print(f"  [{COLORS['muted']}]API: anthropic, ollama, lmstudio, mlx, openai, mistral[/]")
+                console.print(f"  [{COLORS['warning']}]CLI (⚠️ uses subscription credits): claude-cli, codex, gemini[/]")
                 new_backend = single_input("Backend", self.config.model.backend)
                 self.config.model.backend = new_backend
                 print_success(f"Backend: {new_backend}")
@@ -371,6 +372,21 @@ class CompletenessREPL:
                     self._prompt_for_api_key()
             
             elif choice == "4":
+                # Provide model suggestions based on backend
+                backend = self.config.model.backend.lower()
+                if backend in ("claude-cli", "claude_cli", "claudecode", "claude-code"):
+                    console.print(f"  [{COLORS['muted']}]Models: sonnet, opus, haiku[/]")
+                elif backend in ("codex", "codex-cli", "openai-cli"):
+                    console.print(f"  [{COLORS['muted']}]Models: gpt-5-codex, gpt-5, gpt-4o[/]")
+                elif backend in ("gemini", "gemini-cli"):
+                    console.print(f"  [{COLORS['muted']}]Models: gemini-2.5-flash, gemini-2.5-pro, gemini-3-pro[/]")
+                elif backend in ("anthropic", "claude"):
+                    console.print(f"  [{COLORS['muted']}]Models: claude-3-5-sonnet-20241022, claude-3-opus-20250219, claude-3-haiku-20240307[/]")
+                elif backend in ("openai", "gpt"):
+                    console.print(f"  [{COLORS['muted']}]Models: gpt-4o, gpt-4o-mini, gpt-4-turbo[/]")
+                elif backend in ("mistral", "devstral"):
+                    console.print(f"  [{COLORS['muted']}]Models: devstral-small-2505, mistral-large-latest[/]")
+
                 new_model = single_input("Model name", self.config.model.name)
                 self.config.model.name = new_model
                 print_success(f"Model: {new_model}")
@@ -431,29 +447,33 @@ class CompletenessREPL:
             if not self.prompt_for_idea():
                 print_error("Cannot start without a project idea")
                 return
-        
+
         if not self.workspace:
             self.workspace = setup_workspace(self.base_dir)
-        
+
+        # Show settings menu for final review/changes
+        console.print()
+        console.print(f"  [{COLORS['cyan']}]Review your settings before starting:[/]")
         self.settings_menu()
-        
+
         if not self.idea_file:
             print_error("No idea file configured")
             return
-        
+
         console.print()
         console.print(Panel(
-            "Ready to start autonomous development?\n\n"
+            "🚀 Ready to start autonomous development!\n\n"
             f"[{COLORS['muted']}]The agent will read your idea and build the project.[/]\n"
             f"[{COLORS['muted']}]Press Ctrl+C anytime to pause.[/]",
             border_style=COLORS["cyan"],
             box=box.ROUNDED,
+            title="[bold]Launch[/]"
         ))
         console.print()
-        
+
         confirm = single_input("Start building? (y/n)", "y")
         if confirm.lower() != "y":
-            console.print(f"  [{COLORS['muted']}]Cancelled. Type 'go' to try again.[/]")
+            console.print(f"  [{COLORS['muted']}]Cancelled. Adjust settings and type 'go' when ready.[/]")
             return
         
         console.print()
@@ -635,16 +655,23 @@ Start now."""
     
     def run(self):
         print_banner()
-        
+
         found_idea = self.auto_detect()
-        
+
         if found_idea:
             self.print_config()
-            console.print(f"  [{COLORS['cyan']}]Type 'go' to configure and start, or 'help' for options[/]")
+            console.print()
+            console.print(f"  [{COLORS['muted']}]Available commands:[/]")
+            console.print(f"  [{COLORS['cyan']}]settings[/]    - Configure backend, model, and other options")
+            console.print(f"  [{COLORS['cyan']}]backends[/]    - List all available LLM backends")
+            console.print(f"  [{COLORS['cyan']}]go[/]          - Start building (will confirm settings first)")
+            console.print(f"  [{COLORS['cyan']}]help[/]        - Show all commands")
         else:
             console.print()
-            console.print(f"  [{COLORS['muted']}]No idea.md found. Type 'go' to create one.[/]")
-        
+            console.print(f"  [{COLORS['muted']}]No idea.md found.[/]")
+            console.print(f"  [{COLORS['cyan']}]go[/]     - Create an idea.md and start")
+            console.print(f"  [{COLORS['cyan']}]help[/]   - Show all commands")
+
         console.print()
         
         while True:
