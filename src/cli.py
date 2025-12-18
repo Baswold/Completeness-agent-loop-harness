@@ -361,7 +361,8 @@ class CompletenessREPL:
                 print_success(f"Workspace: {self.workspace}")
             
             elif choice == "3":
-                console.print(f"  [{COLORS['muted']}]Available: anthropic, ollama, lmstudio, mlx, openai, mistral[/]")
+                console.print(f"  [{COLORS['muted']}]API: anthropic, ollama, lmstudio, mlx, openai, mistral[/]")
+                console.print(f"  [{COLORS['warning']}]CLI (⚠️ uses subscription credits): claude-cli, codex, gemini[/]")
                 new_backend = single_input("Backend", self.config.model.backend)
                 self.config.model.backend = new_backend
                 print_success(f"Backend: {new_backend}")
@@ -371,6 +372,21 @@ class CompletenessREPL:
                     self._prompt_for_api_key()
             
             elif choice == "4":
+                # Provide model suggestions based on backend
+                backend = self.config.model.backend.lower()
+                if backend in ("claude-cli", "claude_cli", "claudecode", "claude-code"):
+                    console.print(f"  [{COLORS['muted']}]Models: sonnet, opus, haiku[/]")
+                elif backend in ("codex", "codex-cli", "openai-cli"):
+                    console.print(f"  [{COLORS['muted']}]Models: gpt-5-codex, gpt-5, gpt-4o[/]")
+                elif backend in ("gemini", "gemini-cli"):
+                    console.print(f"  [{COLORS['muted']}]Models: gemini-2.5-flash, gemini-2.5-pro, gemini-3-pro[/]")
+                elif backend in ("anthropic", "claude"):
+                    console.print(f"  [{COLORS['muted']}]Models: claude-3-5-sonnet-20241022, claude-3-opus-20250219, claude-3-haiku-20240307[/]")
+                elif backend in ("openai", "gpt"):
+                    console.print(f"  [{COLORS['muted']}]Models: gpt-4o, gpt-4o-mini, gpt-4-turbo[/]")
+                elif backend in ("mistral", "devstral"):
+                    console.print(f"  [{COLORS['muted']}]Models: devstral-small-2505, mistral-large-latest[/]")
+
                 new_model = single_input("Model name", self.config.model.name)
                 self.config.model.name = new_model
                 print_success(f"Model: {new_model}")
