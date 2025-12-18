@@ -447,29 +447,33 @@ class CompletenessREPL:
             if not self.prompt_for_idea():
                 print_error("Cannot start without a project idea")
                 return
-        
+
         if not self.workspace:
             self.workspace = setup_workspace(self.base_dir)
-        
+
+        # Show settings menu for final review/changes
+        console.print()
+        console.print(f"  [{COLORS['cyan']}]Review your settings before starting:[/]")
         self.settings_menu()
-        
+
         if not self.idea_file:
             print_error("No idea file configured")
             return
-        
+
         console.print()
         console.print(Panel(
-            "Ready to start autonomous development?\n\n"
+            "🚀 Ready to start autonomous development!\n\n"
             f"[{COLORS['muted']}]The agent will read your idea and build the project.[/]\n"
             f"[{COLORS['muted']}]Press Ctrl+C anytime to pause.[/]",
             border_style=COLORS["cyan"],
             box=box.ROUNDED,
+            title="[bold]Launch[/]"
         ))
         console.print()
-        
+
         confirm = single_input("Start building? (y/n)", "y")
         if confirm.lower() != "y":
-            console.print(f"  [{COLORS['muted']}]Cancelled. Type 'go' to try again.[/]")
+            console.print(f"  [{COLORS['muted']}]Cancelled. Adjust settings and type 'go' when ready.[/]")
             return
         
         console.print()
@@ -651,16 +655,23 @@ Start now."""
     
     def run(self):
         print_banner()
-        
+
         found_idea = self.auto_detect()
-        
+
         if found_idea:
             self.print_config()
-            console.print(f"  [{COLORS['cyan']}]Type 'go' to configure and start, or 'help' for options[/]")
+            console.print()
+            console.print(f"  [{COLORS['muted']}]Available commands:[/]")
+            console.print(f"  [{COLORS['cyan']}]settings[/]    - Configure backend, model, and other options")
+            console.print(f"  [{COLORS['cyan']}]backends[/]    - List all available LLM backends")
+            console.print(f"  [{COLORS['cyan']}]go[/]          - Start building (will confirm settings first)")
+            console.print(f"  [{COLORS['cyan']}]help[/]        - Show all commands")
         else:
             console.print()
-            console.print(f"  [{COLORS['muted']}]No idea.md found. Type 'go' to create one.[/]")
-        
+            console.print(f"  [{COLORS['muted']}]No idea.md found.[/]")
+            console.print(f"  [{COLORS['cyan']}]go[/]     - Create an idea.md and start")
+            console.print(f"  [{COLORS['cyan']}]help[/]   - Show all commands")
+
         console.print()
         
         while True:
