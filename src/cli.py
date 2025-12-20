@@ -654,16 +654,115 @@ Start now."""
         print_success(f"Config saved to {output}")
     
     def print_help(self):
-        help_text = """[bold]Commands:[/]
-  [cyan]go[/]           Start or configure a new session
-  [cyan]resume[/]       Resume a paused session
-  [cyan]status[/]       Show current progress
-  [cyan]history[/]      Show completeness score history
-  [cyan]settings[/]     Change configuration
-  [cyan]backends[/]     List available LLM backends
-  [cyan]help[/]         Show this help
-  [cyan]quit[/]         Exit"""
-        console.print(Panel(help_text, border_style=COLORS["muted"], box=box.ROUNDED, title="Help"))
+        """Print comprehensive help with ALL commands numbered."""
+        console.print()
+        console.print(Panel(
+            "[bold]Completeness Loop - Command Reference[/]",
+            border_style=COLORS["primary"],
+            box=box.ROUNDED
+        ))
+        console.print()
+        console.print(f"  [{COLORS['muted']}]Type the number or command name:[/]")
+        console.print()
+        console.print(f"  [{COLORS['cyan']}][1] go[/]           Start or configure a new session")
+        console.print(f"  [{COLORS['cyan']}][2] resume[/]       Resume a paused session")
+        console.print(f"  [{COLORS['cyan']}][3] status[/]       Show current progress")
+        console.print(f"  [{COLORS['cyan']}][4] history[/]      Show completeness score history")
+        console.print(f"  [{COLORS['cyan']}][5] backend[/]      Select LLM backend (interactive)")
+        console.print(f"  [{COLORS['cyan']}][6] model[/]        Change model name")
+        console.print(f"  [{COLORS['cyan']}][7] settings[/]     Full configuration menu")
+        console.print(f"  [{COLORS['cyan']}][8] backends[/]     List all available backends")
+        console.print(f"  [{COLORS['cyan']}][9] help[/]         Show this help")
+        console.print(f"  [{COLORS['cyan']}][0] quit[/]         Exit the program")
+        console.print()
+
+    def select_backend_interactive(self):
+        """Interactive backend selection with numbered menu."""
+        console.print()
+        console.print(Panel(
+            "[bold]Select LLM Backend[/]",
+            border_style=COLORS["primary"],
+            box=box.ROUNDED
+        ))
+        console.print()
+        console.print(f"  [{COLORS['success']}]API Backends (recommended):[/]")
+        console.print(f"  [{COLORS['cyan']}][1][/]  anthropic    - Claude (Sonnet, Opus, Haiku)")
+        console.print(f"  [{COLORS['cyan']}][2][/]  openai       - GPT-4, GPT-4o, etc.")
+        console.print(f"  [{COLORS['cyan']}][3][/]  openrouter   - 100+ models (Claude, GPT-4, Gemini, Llama, etc.)")
+        console.print(f"  [{COLORS['cyan']}][4][/]  mistral      - Mistral, Devstral (fast, affordable)")
+        console.print(f"  [{COLORS['cyan']}][5][/]  gemini       - Google Gemini API")
+        console.print()
+        console.print(f"  [{COLORS['muted']}]Local Backends:[/]")
+        console.print(f"  [{COLORS['cyan']}][6][/]  ollama       - Local Ollama server (localhost:11434)")
+        console.print(f"  [{COLORS['cyan']}][7][/]  lmstudio     - LM Studio (localhost:1234)")
+        console.print(f"  [{COLORS['cyan']}][8][/]  mlx          - Apple Silicon native")
+        console.print()
+        console.print(f"  [{COLORS['warning']}]CLI Backends (⚠️ uses subscription credits):[/]")
+        console.print(f"  [{COLORS['cyan']}][9][/]  claude-cli   - Claude Code CLI (Pro/Plus)")
+        console.print(f"  [{COLORS['cyan']}][10][/] codex        - OpenAI Codex CLI")
+        console.print(f"  [{COLORS['cyan']}][11][/] gemini-cli   - Google Gemini CLI")
+        console.print()
+
+        backend_map = {
+            "1": "anthropic",
+            "2": "openai",
+            "3": "openrouter",
+            "4": "mistral",
+            "5": "gemini",
+            "6": "ollama",
+            "7": "lmstudio",
+            "8": "mlx",
+            "9": "claude-cli",
+            "10": "codex",
+            "11": "gemini-cli",
+        }
+
+        choice = single_input("Select backend (number or name)", self.config.model.backend)
+
+        # Map number to backend name
+        selected_backend = backend_map.get(choice, choice)
+
+        self.config.model.backend = selected_backend
+        print_success(f"Backend set to: {selected_backend}")
+
+        # Auto-prompt for API key if needed
+        if selected_backend.lower() in ("openai", "gpt", "anthropic", "claude", "openrouter", "mistral", "gemini"):
+            console.print()
+            self._prompt_for_api_key()
+
+        # Suggest popular models for the backend
+        console.print()
+        self._suggest_model_for_backend(selected_backend)
+
+    def _suggest_model_for_backend(self, backend: str):
+        """Suggest models for the selected backend."""
+        backend = backend.lower()
+
+        if backend in ("claude-cli", "claude_cli", "claudecode", "claude-code"):
+            console.print(f"  [{COLORS['muted']}]Popular models: sonnet, opus, haiku[/]")
+        elif backend in ("codex", "codex-cli", "openai-cli"):
+            console.print(f"  [{COLORS['muted']}]Popular models: gpt-5-codex, gpt-5, gpt-4o[/]")
+        elif backend in ("gemini", "gemini-cli"):
+            console.print(f"  [{COLORS['muted']}]Popular models: gemini-2.5-flash, gemini-2.5-pro[/]")
+        elif backend in ("anthropic", "claude"):
+            console.print(f"  [{COLORS['muted']}]Popular models: claude-3-5-sonnet-20241022, claude-3-opus-20250219[/]")
+        elif backend in ("openai", "gpt"):
+            console.print(f"  [{COLORS['muted']}]Popular models: gpt-4o, gpt-4o-mini, gpt-4-turbo[/]")
+        elif backend in ("mistral", "devstral"):
+            console.print(f"  [{COLORS['muted']}]Popular models: devstral-small-2505, mistral-large-latest[/]")
+        elif backend == "openrouter":
+            console.print(f"  [{COLORS['muted']}]Popular models:[/]")
+            console.print(f"  [{COLORS['muted']}]  - anthropic/claude-3.5-sonnet[/]")
+            console.print(f"  [{COLORS['muted']}]  - google/gemini-2.0-flash-exp[/]")
+            console.print(f"  [{COLORS['muted']}]  - openai/gpt-4-turbo[/]")
+            console.print(f"  [{COLORS['muted']}]  - qwen/qwen-2.5-coder-32b-instruct[/]")
+            console.print(f"  [{COLORS['muted']}]Full list: https://openrouter.ai/models[/]")
+
+        change_model = single_input("Change model? (y/n)", "n")
+        if change_model.lower() == "y":
+            new_model = single_input("Model name", self.config.model.name)
+            self.config.model.name = new_model
+            print_success(f"Model set to: {new_model}")
     
     def run(self):
         print_banner()
@@ -672,20 +771,10 @@ Start now."""
 
         if found_idea:
             self.print_config()
-            console.print()
-            console.print(f"  [{COLORS['muted']}]Available commands:[/]")
-            console.print(f"  [{COLORS['cyan']}]settings[/]    - Configure backend, model, and other options")
-            console.print(f"  [{COLORS['cyan']}]backends[/]    - List all available LLM backends")
-            console.print(f"  [{COLORS['cyan']}]go[/]          - Start building (will confirm settings first)")
-            console.print(f"  [{COLORS['cyan']}]help[/]        - Show all commands")
-        else:
-            console.print()
-            console.print(f"  [{COLORS['muted']}]No idea.md found.[/]")
-            console.print(f"  [{COLORS['cyan']}]go[/]     - Create an idea.md and start")
-            console.print(f"  [{COLORS['cyan']}]help[/]   - Show all commands")
 
-        console.print()
-        
+        # Always show full help at startup
+        self.print_help()
+
         while True:
             try:
                 line = prompt(
@@ -700,13 +789,30 @@ Start now."""
                     continue
                 console.print()
                 break
-            
+
             if not line:
                 continue
-            
+
             parts = line.split()
             cmd = parts[0].lower()
-            
+
+            # Map numbers to commands
+            command_map = {
+                "1": "go",
+                "2": "resume",
+                "3": "status",
+                "4": "history",
+                "5": "backend",
+                "6": "model",
+                "7": "settings",
+                "8": "backends",
+                "9": "help",
+                "0": "quit",
+            }
+
+            # Convert number to command name
+            cmd = command_map.get(cmd, cmd)
+
             if cmd in ("quit", "exit", "q"):
                 break
             elif cmd in ("go", "start", "run"):
@@ -717,6 +823,10 @@ Start now."""
                 self.cmd_status()
             elif cmd in ("history", "score", "scores"):
                 self.cmd_history()
+            elif cmd == "backend":
+                self.select_backend_interactive()
+            elif cmd == "model":
+                self._suggest_model_for_backend(self.config.model.backend)
             elif cmd == "settings":
                 self.settings_menu()
             elif cmd == "backends":
@@ -727,8 +837,8 @@ Start now."""
                 self.print_help()
             else:
                 print_error(f"Unknown command: {cmd}")
-                console.print(f"  [{COLORS['muted']}]Type 'help' for available commands[/]")
-        
+                console.print(f"  [{COLORS['muted']}]Type 'help' or '9' for available commands[/]")
+
         console.print()
         console.print(f"[{COLORS['muted']}]Goodbye![/]")
         console.print()
