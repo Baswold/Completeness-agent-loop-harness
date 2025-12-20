@@ -15,8 +15,9 @@ class ToolResult:
 
 
 class ToolRegistry:
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, agent_name: str = "agent1"):
         self.workspace = workspace
+        self.agent_name = agent_name  # "agent1" or "agent2"
         self._tools: Dict[str, Callable] = {}
         self._schemas: Dict[str, Dict] = {}
         self._register_default_tools()
@@ -261,7 +262,7 @@ class ToolRegistry:
             "type": "function",
             "function": {
                 "name": "memory_read",
-                "description": "Read the shared memory file (MEMORY.md) to understand project context, lessons learned, and important information from previous iterations",
+                "description": "Read YOUR agent-specific memory file to understand project context, lessons learned, and important information from your previous iterations. This is YOUR personal memory - other agents cannot see it.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
@@ -273,7 +274,7 @@ class ToolRegistry:
             "type": "function",
             "function": {
                 "name": "memory_write",
-                "description": "Save important information to shared memory (MEMORY.md). Use this to document: project architecture, key decisions, lessons learned, common errors and solutions, important file locations, testing strategies, and any knowledge that would help future iterations. You SHOULD use this before finishing your work to help the next agent.",
+                "description": "Save important information to YOUR agent-specific memory file. Use this to document: project architecture, key decisions, lessons learned, common errors and solutions, important file locations, testing strategies, and any knowledge that would help YOUR future iterations. You SHOULD use this before finishing your work to help yourself in the next iteration.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -485,32 +486,66 @@ class ToolRegistry:
         return self._bash(f"{command} {path}")
 
     def _memory_read(self) -> ToolResult:
-        """Read the shared memory file."""
+        """Read the agent-specific memory file."""
         try:
-            memory_file = self.workspace / "MEMORY.md"
-            if not memory_file.exists():
-                # Create initial memory file with template
-                initial_content = """# Project Memory
+            # Each agent gets their own memory file to maintain isolation
+            memory_file = self.workspace / f"{self.agent_name.upper()}_MEMORY.md"
 
-This file stores important information across agent iterations.
+            if not memory_file.exists():
+                # Create initial memory file with agent-specific template
+                if self.agent_name == "agent1":
+                    initial_content = """# Agent 1 Implementation Memory
+
+This is YOUR personal memory file. Agent 2 cannot see this.
+Use it to remember what you've learned across iterations.
 
 ## Architecture
-(Project structure and key design decisions)
+(Project structure and key design decisions you've made)
 
-## Lessons Learned
-(Important discoveries and solutions to common problems)
+## Implementation Strategies
+(Approaches that worked well for implementing features)
 
-## Common Issues
-(Known problems and their solutions)
+## Common Errors & Solutions
+(Bugs you encountered and how you fixed them)
 
-## Testing Strategy
-(How to run tests, what to test)
+## Testing Commands
+(How to run tests, what test frameworks are being used)
 
 ## Important Files
-(Key files and their purposes)
+(Key files you created/modified and their purposes)
+
+## Dependencies & Setup
+(Packages installed, configuration needed)
 
 ## Next Steps
-(What should be prioritized in future iterations)
+(What you should prioritize in your next iteration)
+"""
+                else:  # agent2
+                    initial_content = """# Agent 2 Review Memory
+
+This is YOUR personal memory file. Agent 1 cannot see this.
+Use it to remember patterns and issues you've observed.
+
+## Incomplete Patterns
+(Common ways Agent 1 claims completeness but isn't complete)
+
+## Testing Gaps
+(Types of tests Agent 1 frequently forgets)
+
+## Code Quality Issues
+(Recurring code quality problems to watch for)
+
+## Specification Mismatches
+(Parts of the spec Agent 1 tends to miss or misinterpret)
+
+## Review Strategies
+(Effective approaches for catching incompleteness)
+
+## Project Progress
+(Objective assessment of what's actually working)
+
+## Priority Issues
+(Most critical problems that need fixing next)
 """
                 memory_file.write_text(initial_content)
                 return ToolResult(True, initial_content)
@@ -521,15 +556,18 @@ This file stores important information across agent iterations.
             return ToolResult(False, "", str(e))
 
     def _memory_write(self, section: str, content: str, append: bool = True) -> ToolResult:
-        """Write to the shared memory file."""
+        """Write to the agent-specific memory file."""
         try:
-            memory_file = self.workspace / "MEMORY.md"
+            # Each agent writes to their own memory file
+            memory_file = self.workspace / f"{self.agent_name.upper()}_MEMORY.md"
 
             # Read existing content or create new
             if memory_file.exists():
                 existing_content = memory_file.read_text()
             else:
-                existing_content = "# Project Memory\n\n"
+                # Create with agent-specific header
+                header = "Agent 1 Implementation Memory" if self.agent_name == "agent1" else "Agent 2 Review Memory"
+                existing_content = f"# {header}\n\n"
 
             # Find or create section
             section_header = f"## {section}"
@@ -565,6 +603,6 @@ This file stores important information across agent iterations.
                 new_content = '\n'.join(lines)
 
             memory_file.write_text(new_content)
-            return ToolResult(True, f"Memory updated in section '{section}'")
+            return ToolResult(True, f"Memory updated in section '{section}' ({self.agent_name})")
         except Exception as e:
             return ToolResult(False, "", str(e))

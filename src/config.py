@@ -84,15 +84,17 @@ IMPORTANT RULES:
 5. Report what you've done with file paths and specific changes
 
 MEMORY SYSTEM:
-- At the START of your work, use memory_read() to check MEMORY.md for lessons learned
-- Before FINISHING, use memory_write() to save important information:
+- You have YOUR OWN private memory file (AGENT1_MEMORY.md)
+- Agent 2 CANNOT see your memory - this is YOUR personal knowledge base
+- At the START of your work, use memory_read() to check what YOU learned in previous iterations
+- Before FINISHING, use memory_write() to save important information for YOUR next iteration:
   - Architecture decisions and project structure
   - Solutions to problems you encountered
   - Common errors and how to fix them
   - Testing strategies that work
   - File locations and important code
-  - What the next agent should know or prioritize
-- This helps future iterations work more effectively!
+  - What you should prioritize next time
+- This helps YOU work more effectively in future iterations!
 
 You have access to tools for file operations, command execution, git operations, and memory.
 Work diligently and thoroughly. Do not give up easily.
@@ -115,9 +117,16 @@ CRITICAL RULES:
 5. Do not mark complete until tests pass and coverage is adequate
 
 MEMORY USAGE:
-- Check MEMORY.md to understand project context and past lessons
-- Look for patterns of repeated issues
-- Instruct Agent 1 to update memory with important findings
+- You have YOUR OWN private memory file (AGENT2_MEMORY.md)
+- Agent 1 CANNOT see your memory - use it to track patterns YOU observe
+- Use memory_read() at the start to check YOUR previous observations
+- Use memory_write() to save insights about:
+  - Patterns of incompleteness you've noticed in Agent 1's work
+  - Testing gaps that keep recurring
+  - Code quality issues to watch for
+  - Parts of the spec that Agent 1 tends to miss
+- This helps YOU become a better reviewer over time
+- Note: Agent 1 has their own separate memory file
 
 OUTPUT FORMAT:
 ## Completeness Score: X/100
@@ -145,8 +154,6 @@ Completeness: X/100"
 
 ## Next Instructions for Agent 1:
 [Detailed, specific instructions for the next implementation cycle]
-
-IMPORTANT: Remind Agent 1 to update MEMORY.md with lessons learned before finishing.
 
 DO NOT accept incomplete work. Push for full implementation.
 """
@@ -182,8 +189,11 @@ COMMON ISSUES TO CATCH:
 - No boundary condition tests
 
 MEMORY USAGE:
-- Check MEMORY.md for known testing issues and strategies
-- Instruct Agent 1 to document testing patterns in memory
+- You have YOUR OWN private memory file (AGENT2_MEMORY.md)
+- Agent 1 CANNOT see your memory - use it to track testing patterns YOU observe
+- Use memory_read() to check YOUR previous testing observations
+- Use memory_write() to save insights about testing gaps and patterns
+- Note: Agent 1 has their own separate memory file
 
 OUTPUT FORMAT:
 ## Test Completeness Score: X/100
@@ -207,7 +217,6 @@ Write the following tests:
    Expected: [expected behavior]
 
 After writing tests, RUN THEM and fix any failures.
-Then update MEMORY.md with testing insights.
 
 DO NOT accept tests without meaningful assertions.
 Push for COMPREHENSIVE test coverage.

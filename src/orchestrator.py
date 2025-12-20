@@ -105,35 +105,41 @@ class Orchestrator:
         
         self.state = LoopState()
         self.state_file = workspace / ".completeness_state.json"
-        
+
         self.llm = create_backend(config)
-        self.tools = ToolRegistry(workspace)
+
+        # Create separate tool registries for each agent to maintain memory isolation
+        # Agent1 gets full tools access with agent1-specific memory
+        self.agent1_tools = ToolRegistry(workspace, agent_name="agent1")
+        # Agent2 gets tools for memory access only, with agent2-specific memory
+        self.agent2_tools = ToolRegistry(workspace, agent_name="agent2")
+
         self.context_builder = ContextBuilder(
             workspace,
             original_spec_name=idea_file.name if idea_file else "idea.md"
         )
-        
+
         agent1_prompt = config.agents.agent1_system_prompt
         if agent1_prompt and Path(agent1_prompt).exists():
             agent1_prompt = Path(agent1_prompt).read_text()
         else:
             agent1_prompt = DEFAULT_AGENT1_PROMPT
-        
+
         agent2_impl_prompt = config.agents.agent2_implementation_prompt
         if agent2_impl_prompt and Path(agent2_impl_prompt).exists():
             agent2_impl_prompt = Path(agent2_impl_prompt).read_text()
         else:
             agent2_impl_prompt = DEFAULT_AGENT2_IMPLEMENTATION_PROMPT
-        
+
         agent2_test_prompt = config.agents.agent2_testing_prompt
         if agent2_test_prompt and Path(agent2_test_prompt).exists():
             agent2_test_prompt = Path(agent2_test_prompt).read_text()
         else:
             agent2_test_prompt = DEFAULT_AGENT2_TESTING_PROMPT
-        
-        self.agent1 = Agent1(self.llm, self.tools, agent1_prompt)
-        self.agent2_implementation = Agent2(self.llm, agent2_impl_prompt)
-        self.agent2_testing = Agent2(self.llm, agent2_test_prompt)
+
+        self.agent1 = Agent1(self.llm, self.agent1_tools, agent1_prompt)
+        self.agent2_implementation = Agent2(self.llm, agent2_impl_prompt, self.agent2_tools)
+        self.agent2_testing = Agent2(self.llm, agent2_test_prompt, self.agent2_tools)
         self.testing_threshold = config.agents.testing_phase_threshold
         
         self.original_spec = idea_file.read_text() if idea_file.exists() else ""
@@ -226,10 +232,10 @@ class Orchestrator:
                 
                 # Execute git add
                 for file_path in files_to_add:
-                    self.tools.execute('git_add', {'paths': [file_path]})
-                
+                    self.agent1_tools.execute('git_add', {'paths': [file_path]})
+
                 # Execute git commit with sanitized message
-                result = self.tools.execute('git_commit', {'message': sanitized_message})
+                result = self.agent1_tools.execute('git_commit', {'message': sanitized_message})
                 
                 if result.success:
                     self._update_status(f"Git commit executed: {sanitized_message[:50]}...")
