@@ -15,8 +15,9 @@ class ToolResult:
 
 
 class ToolRegistry:
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, agent_name: str = "agent1"):
         self.workspace = workspace
+        self.agent_name = agent_name  # "agent1" or "agent2"
         self._tools: Dict[str, Callable] = {}
         self._schemas: Dict[str, Dict] = {}
         self._register_default_tools()
@@ -256,6 +257,45 @@ class ToolRegistry:
                 }
             }
         })
+
+        self.register("memory_read", self._memory_read, {
+            "type": "function",
+            "function": {
+                "name": "memory_read",
+                "description": "Read YOUR agent-specific memory file to understand project context, lessons learned, and important information from your previous iterations. This is YOUR personal memory - other agents cannot see it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+
+        self.register("memory_write", self._memory_write, {
+            "type": "function",
+            "function": {
+                "name": "memory_write",
+                "description": "Save important information to YOUR agent-specific memory file. Use this to document: project architecture, key decisions, lessons learned, common errors and solutions, important file locations, testing strategies, and any knowledge that would help YOUR future iterations. You SHOULD use this before finishing your work to help yourself in the next iteration.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "description": "Section header for the memory entry (e.g., 'Architecture', 'Lessons Learned', 'Common Issues')"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The information to save. Be specific and actionable."
+                        },
+                        "append": {
+                            "type": "boolean",
+                            "description": "If true, append to existing section. If false, replace section content.",
+                            "default": True
+                        }
+                    },
+                    "required": ["section", "content"]
+                }
+            }
+        })
     
     def register(self, name: str, func: Callable, schema: Dict):
         self._tools[name] = func
@@ -444,3 +484,125 @@ class ToolRegistry:
     
     def _run_tests(self, command: str = "pytest", path: str = ".") -> ToolResult:
         return self._bash(f"{command} {path}")
+
+    def _memory_read(self) -> ToolResult:
+        """Read the agent-specific memory file."""
+        try:
+            # Each agent gets their own memory file to maintain isolation
+            memory_file = self.workspace / f"{self.agent_name.upper()}_MEMORY.md"
+
+            if not memory_file.exists():
+                # Create initial memory file with agent-specific template
+                if self.agent_name == "agent1":
+                    initial_content = """# Agent 1 Implementation Memory
+
+This is YOUR personal memory file. Agent 2 cannot see this.
+Use it to remember what you've learned across iterations.
+
+## Architecture
+(Project structure and key design decisions you've made)
+
+## Implementation Strategies
+(Approaches that worked well for implementing features)
+
+## Common Errors & Solutions
+(Bugs you encountered and how you fixed them)
+
+## Testing Commands
+(How to run tests, what test frameworks are being used)
+
+## Important Files
+(Key files you created/modified and their purposes)
+
+## Dependencies & Setup
+(Packages installed, configuration needed)
+
+## Next Steps
+(What you should prioritize in your next iteration)
+"""
+                else:  # agent2
+                    initial_content = """# Agent 2 Review Memory
+
+This is YOUR personal memory file. Agent 1 cannot see this.
+Use it to remember patterns and issues you've observed.
+
+## Incomplete Patterns
+(Common ways Agent 1 claims completeness but isn't complete)
+
+## Testing Gaps
+(Types of tests Agent 1 frequently forgets)
+
+## Code Quality Issues
+(Recurring code quality problems to watch for)
+
+## Specification Mismatches
+(Parts of the spec Agent 1 tends to miss or misinterpret)
+
+## Review Strategies
+(Effective approaches for catching incompleteness)
+
+## Project Progress
+(Objective assessment of what's actually working)
+
+## Priority Issues
+(Most critical problems that need fixing next)
+"""
+                memory_file.write_text(initial_content)
+                return ToolResult(True, initial_content)
+
+            content = memory_file.read_text()
+            return ToolResult(True, content)
+        except Exception as e:
+            return ToolResult(False, "", str(e))
+
+    def _memory_write(self, section: str, content: str, append: bool = True) -> ToolResult:
+        """Write to the agent-specific memory file."""
+        try:
+            # Each agent writes to their own memory file
+            memory_file = self.workspace / f"{self.agent_name.upper()}_MEMORY.md"
+
+            # Read existing content or create new
+            if memory_file.exists():
+                existing_content = memory_file.read_text()
+            else:
+                # Create with agent-specific header
+                header = "Agent 1 Implementation Memory" if self.agent_name == "agent1" else "Agent 2 Review Memory"
+                existing_content = f"# {header}\n\n"
+
+            # Find or create section
+            section_header = f"## {section}"
+            lines = existing_content.split('\n')
+
+            # Find section start and end
+            section_start = -1
+            section_end = -1
+            for i, line in enumerate(lines):
+                if line.strip() == section_header:
+                    section_start = i
+                elif section_start >= 0 and line.strip().startswith("## "):
+                    section_end = i
+                    break
+
+            if section_start == -1:
+                # Section doesn't exist, add at end
+                if not existing_content.endswith('\n\n'):
+                    existing_content += '\n\n'
+                new_content = existing_content + f"{section_header}\n{content}\n"
+            else:
+                # Section exists
+                if section_end == -1:
+                    section_end = len(lines)
+
+                if append:
+                    # Append to existing section
+                    lines.insert(section_end, content)
+                else:
+                    # Replace section content
+                    lines = lines[:section_start+1] + [content] + lines[section_end:]
+
+                new_content = '\n'.join(lines)
+
+            memory_file.write_text(new_content)
+            return ToolResult(True, f"Memory updated in section '{section}' ({self.agent_name})")
+        except Exception as e:
+            return ToolResult(False, "", str(e))

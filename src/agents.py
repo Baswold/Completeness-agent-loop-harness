@@ -118,10 +118,11 @@ Execute these instructions now. Use the available tools to implement the require
 
 
 class Agent2:
-    def __init__(self, llm: LLMBackend, system_prompt: str):
+    def __init__(self, llm: LLMBackend, system_prompt: str, tools: Optional[ToolRegistry] = None):
         self.llm = llm
         self.system_prompt = system_prompt
-    
+        self.tools = tools  # For memory access only
+
     def review(
         self,
         original_spec: str,
@@ -129,8 +130,18 @@ class Agent2:
         git_log: str
     ) -> "ReviewResult":
         messages = [{"role": "system", "content": self.system_prompt}]
-        
-        user_content = f"""## ORIGINAL SPECIFICATION
+
+        # Read Agent 2's own memory if tools are available
+        memory_content = ""
+        if self.tools:
+            memory_result = self.tools.execute('memory_read', {})
+            if memory_result.success:
+                memory_content = f"""## YOUR MEMORY (Agent 2)
+{memory_result.output}
+
+"""
+
+        user_content = memory_content + f"""## ORIGINAL SPECIFICATION
 {original_spec}
 
 ## CURRENT CODEBASE
@@ -141,14 +152,35 @@ class Agent2:
 
 Review the codebase against the specification. Rate completeness and provide specific next instructions.
 Do NOT trust claims in commit messages - verify everything in the actual code.
+
+IMPORTANT: Before finishing your review, use memory_write() to save any important observations about:
+- Patterns of incompleteness you've noticed
+- Testing gaps that keep recurring
+- Code quality issues to watch for
+- Parts of the spec that keep being missed
 """
         messages.append({"role": "user", "content": user_content})
-        
+
+        # Get tool schemas for memory operations only
+        tool_schemas = None
+        if self.tools and self.llm.supports_tools():
+            # Filter to only memory tools
+            all_schemas = self.tools.get_schemas()
+            tool_schemas = [s for s in all_schemas if s['function']['name'] in ['memory_read', 'memory_write']]
+
         response = self.llm.generate(
             messages=messages,
+            tools=tool_schemas,
             max_tokens=4096
         )
-        
+
+        # If Agent2 made tool calls (memory writes), execute them
+        if response.tool_calls and self.tools:
+            for tool_call in response.tool_calls:
+                if tool_call.get('function', {}).get('name') in ['memory_write']:
+                    args = json.loads(tool_call['function']['arguments'])
+                    self.tools.execute('memory_write', args)
+
         return ReviewResult.parse(response.content, response.usage)
 
 

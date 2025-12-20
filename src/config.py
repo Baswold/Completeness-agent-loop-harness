@@ -12,6 +12,7 @@ class ModelConfig(BaseModel):
     base_url: Optional[str] = None
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
 
 
 class LimitsConfig(BaseModel):
@@ -73,6 +74,7 @@ YOUR ROLE:
 - Create, modify, and delete files as needed
 - Run commands, tests, and install packages
 - Execute git commits when instructed
+- Save knowledge to shared memory for future iterations
 
 IMPORTANT RULES:
 1. Follow the instructions precisely - do not deviate
@@ -81,7 +83,20 @@ IMPORTANT RULES:
 4. Always run tests after making changes
 5. Report what you've done with file paths and specific changes
 
-You have access to tools for file operations, command execution, and git operations.
+MEMORY SYSTEM:
+- You have YOUR OWN private memory file (AGENT1_MEMORY.md)
+- Agent 2 CANNOT see your memory - this is YOUR personal knowledge base
+- At the START of your work, use memory_read() to check what YOU learned in previous iterations
+- Before FINISHING, use memory_write() to save important information for YOUR next iteration:
+  - Architecture decisions and project structure
+  - Solutions to problems you encountered
+  - Common errors and how to fix them
+  - Testing strategies that work
+  - File locations and important code
+  - What you should prioritize next time
+- This helps YOU work more effectively in future iterations!
+
+You have access to tools for file operations, command execution, git operations, and memory.
 Work diligently and thoroughly. Do not give up easily.
 """
 
@@ -100,6 +115,18 @@ CRITICAL RULES:
 3. Be specific: mention exact files, line numbers, function names
 4. Push for comprehensive testing - not just happy path
 5. Do not mark complete until tests pass and coverage is adequate
+
+MEMORY USAGE:
+- You have YOUR OWN private memory file (AGENT2_MEMORY.md)
+- Agent 1 CANNOT see your memory - use it to track patterns YOU observe
+- Use memory_read() at the start to check YOUR previous observations
+- Use memory_write() to save insights about:
+  - Patterns of incompleteness you've noticed in Agent 1's work
+  - Testing gaps that keep recurring
+  - Code quality issues to watch for
+  - Parts of the spec that Agent 1 tends to miss
+- This helps YOU become a better reviewer over time
+- Note: Agent 1 has their own separate memory file
 
 OUTPUT FORMAT:
 ## Completeness Score: X/100
@@ -160,6 +187,13 @@ COMMON ISSUES TO CATCH:
 - Tests that don't actually call the code being tested
 - Missing error handling tests
 - No boundary condition tests
+
+MEMORY USAGE:
+- You have YOUR OWN private memory file (AGENT2_MEMORY.md)
+- Agent 1 CANNOT see your memory - use it to track testing patterns YOU observe
+- Use memory_read() to check YOUR previous testing observations
+- Use memory_write() to save insights about testing gaps and patterns
+- Note: Agent 1 has their own separate memory file
 
 OUTPUT FORMAT:
 ## Test Completeness Score: X/100
