@@ -123,7 +123,7 @@ def copy_idea_to_workspace(idea_file: Path, workspace: Path):
     return dest
 
 
-def print_cycle_result(result: CycleResult, phase: str, state=None):
+def print_cycle_result(result: CycleResult, phase: str, state=None, expanded: bool = False):
     console.print()
 
     phase_color = COLORS["cyan"] if phase == "implementation" else COLORS["purple"]
@@ -155,7 +155,35 @@ def print_cycle_result(result: CycleResult, phase: str, state=None):
         # Show cumulative metrics when cycle-specific ones aren't available
         tokens = state.total_agent2_usage.total_tokens
         content.append(f"\nReviewer      {tokens:,} tokens (cumulative)")
-    
+
+    # Expanded mode: show full agent outputs and tool details
+    if expanded:
+        content.append("\n\n" + "─" * 40)
+
+        if result.agent1_response:
+            content.append("\n\n[bold cyan]Agent 1 Output:[/]")
+            agent1_output = result.agent1_response.content[:1000]  # Limit to first 1000 chars
+            if len(result.agent1_response.content) > 1000:
+                agent1_output += "\n... (truncated)"
+            content.append(f"\n{agent1_output}")
+
+            if result.agent1_response.tool_calls_made:
+                content.append("\n\n[bold cyan]Tool Calls:[/]")
+                for i, call in enumerate(result.agent1_response.tool_calls_made[:5], 1):
+                    content.append(f"\n  {i}. {call.get('name', 'unknown')}")
+
+        if result.agent2_review:
+            content.append("\n\n[bold purple]Agent 2 Review:[/]")
+            review_output = result.agent2_review.raw_content[:800]  # Limit to first 800 chars
+            if len(result.agent2_review.raw_content) > 800:
+                review_output += "\n... (truncated)"
+            content.append(f"\n{review_output}")
+
+        content.append("\n\n" + "─" * 40)
+        content.append("\n[dim]Tip: Type 'expand' to toggle expanded view[/]")
+    else:
+        content.append("\n[dim]Type 'expand' to see full output[/]")
+
     border_color = COLORS["success"] if result.completeness_score >= 90 else COLORS["primary"]
     
     console.print(Panel(
@@ -272,6 +300,8 @@ class CompletenessREPL:
         self.running = False
         self.history = InMemoryHistory()
         self.custom_instructions = ""
+        self.last_cycle_result: Optional[CycleResult] = None
+        self.show_expanded = False  # Toggle for expanded output
     
     def get_prompt_text(self):
         return HTML('<prompt>❯ </prompt>')
@@ -514,12 +544,13 @@ Start now."""
     
     def _run_loop(self, idea_path: Path, workspace_path: Path, resume: bool = False, initial_prompt: str = ""):
         start_time = time.time()
-        
+
         def on_cycle(result: CycleResult):
+            self.last_cycle_result = result  # Save for expand command
             phase = self.orchestrator.state.phase if self.orchestrator else "implementation"
             state = self.orchestrator.state if self.orchestrator else None
-            print_cycle_result(result, phase, state)
-        
+            print_cycle_result(result, phase, state, expanded=self.show_expanded)
+
         def on_status(status: str):
             print_info(status)
         
@@ -616,7 +647,22 @@ Start now."""
         
         console.print(table)
         console.print()
-    
+
+    def cmd_expand(self):
+        """Toggle expanded view and show last cycle details."""
+        if not self.last_cycle_result:
+            print_info("No cycle results available yet. Run 'go' first.")
+            return
+
+        self.show_expanded = not self.show_expanded
+        mode = "expanded" if self.show_expanded else "collapsed"
+        print_info(f"View toggled to {mode}")
+
+        # Re-display the last cycle result with new expanded setting
+        phase = self.orchestrator.state.phase if self.orchestrator else "implementation"
+        state = self.orchestrator.state if self.orchestrator else None
+        print_cycle_result(self.last_cycle_result, phase, state, expanded=self.show_expanded)
+
     def cmd_backends(self):
         console.print()
         console.print(Panel(
@@ -653,6 +699,9 @@ Start now."""
         console.print(f"  [{COLORS['cyan']}][8] backends[/]     List all available backends")
         console.print(f"  [{COLORS['cyan']}][9] help[/]         Show this help")
         console.print(f"  [{COLORS['cyan']}][0] quit[/]         Exit the program")
+        console.print()
+        console.print(f"  [{COLORS['muted']}]Other commands:[/]")
+        console.print(f"  [{COLORS['cyan']}]expand[/]           Toggle expanded/collapsed cycle output view")
         console.print()
 
     def select_backend_interactive(self):
@@ -823,6 +872,8 @@ Start now."""
                 self.cmd_config()
             elif cmd == "help":
                 self.print_help()
+            elif cmd in ("expand", "e"):
+                self.cmd_expand()
             else:
                 print_error(f"Unknown command: {cmd}")
                 console.print(f"  [{COLORS['muted']}]Type 'help' or '9' for available commands[/]")

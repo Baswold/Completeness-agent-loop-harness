@@ -36,8 +36,17 @@ class Agent1:
         task_summary: Optional[str] = None
     ) -> AgentResponse:
         messages = [{"role": "system", "content": self.system_prompt}]
-        
-        user_content = f"""## CODEBASE SNAPSHOT
+
+        # Read Agent 1's own memory at the start (just like Agent 2 does)
+        memory_content = ""
+        memory_result = self.tools.execute('memory_read', {})
+        if memory_result.success:
+            memory_content = f"""## YOUR MEMORY (Agent 1)
+{memory_result.output}
+
+"""
+
+        user_content = memory_content + f"""## CODEBASE SNAPSHOT
 {codebase_context}
 
 """
@@ -211,10 +220,15 @@ class ReviewResult:
         
         for line in lines:
             line_lower = line.lower().strip()
-            
-            if "completeness score" in line_lower:
+
+            # More robust score parsing - handle multiple formats
+            if "completeness" in line_lower and ("score" in line_lower or ":" in line_lower):
                 import re
-                match = re.search(r"(\d+)", line)
+                # Try to find patterns like "X/100", "X%", or just "X"
+                match = re.search(r"(\d+)\s*/\s*100", line) or \
+                        re.search(r"(\d+)\s*%", line) or \
+                        re.search(r":\s*(\d+)", line) or \
+                        re.search(r"(\d+)", line)
                 if match:
                     score = int(match.group(1))
                 current_section = "score"
