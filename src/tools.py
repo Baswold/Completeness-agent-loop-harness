@@ -256,6 +256,45 @@ class ToolRegistry:
                 }
             }
         })
+
+        self.register("memory_read", self._memory_read, {
+            "type": "function",
+            "function": {
+                "name": "memory_read",
+                "description": "Read the shared memory file (MEMORY.md) to understand project context, lessons learned, and important information from previous iterations",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        })
+
+        self.register("memory_write", self._memory_write, {
+            "type": "function",
+            "function": {
+                "name": "memory_write",
+                "description": "Save important information to shared memory (MEMORY.md). Use this to document: project architecture, key decisions, lessons learned, common errors and solutions, important file locations, testing strategies, and any knowledge that would help future iterations. You SHOULD use this before finishing your work to help the next agent.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "description": "Section header for the memory entry (e.g., 'Architecture', 'Lessons Learned', 'Common Issues')"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The information to save. Be specific and actionable."
+                        },
+                        "append": {
+                            "type": "boolean",
+                            "description": "If true, append to existing section. If false, replace section content.",
+                            "default": True
+                        }
+                    },
+                    "required": ["section", "content"]
+                }
+            }
+        })
     
     def register(self, name: str, func: Callable, schema: Dict):
         self._tools[name] = func
@@ -444,3 +483,88 @@ class ToolRegistry:
     
     def _run_tests(self, command: str = "pytest", path: str = ".") -> ToolResult:
         return self._bash(f"{command} {path}")
+
+    def _memory_read(self) -> ToolResult:
+        """Read the shared memory file."""
+        try:
+            memory_file = self.workspace / "MEMORY.md"
+            if not memory_file.exists():
+                # Create initial memory file with template
+                initial_content = """# Project Memory
+
+This file stores important information across agent iterations.
+
+## Architecture
+(Project structure and key design decisions)
+
+## Lessons Learned
+(Important discoveries and solutions to common problems)
+
+## Common Issues
+(Known problems and their solutions)
+
+## Testing Strategy
+(How to run tests, what to test)
+
+## Important Files
+(Key files and their purposes)
+
+## Next Steps
+(What should be prioritized in future iterations)
+"""
+                memory_file.write_text(initial_content)
+                return ToolResult(True, initial_content)
+
+            content = memory_file.read_text()
+            return ToolResult(True, content)
+        except Exception as e:
+            return ToolResult(False, "", str(e))
+
+    def _memory_write(self, section: str, content: str, append: bool = True) -> ToolResult:
+        """Write to the shared memory file."""
+        try:
+            memory_file = self.workspace / "MEMORY.md"
+
+            # Read existing content or create new
+            if memory_file.exists():
+                existing_content = memory_file.read_text()
+            else:
+                existing_content = "# Project Memory\n\n"
+
+            # Find or create section
+            section_header = f"## {section}"
+            lines = existing_content.split('\n')
+
+            # Find section start and end
+            section_start = -1
+            section_end = -1
+            for i, line in enumerate(lines):
+                if line.strip() == section_header:
+                    section_start = i
+                elif section_start >= 0 and line.strip().startswith("## "):
+                    section_end = i
+                    break
+
+            if section_start == -1:
+                # Section doesn't exist, add at end
+                if not existing_content.endswith('\n\n'):
+                    existing_content += '\n\n'
+                new_content = existing_content + f"{section_header}\n{content}\n"
+            else:
+                # Section exists
+                if section_end == -1:
+                    section_end = len(lines)
+
+                if append:
+                    # Append to existing section
+                    lines.insert(section_end, content)
+                else:
+                    # Replace section content
+                    lines = lines[:section_start+1] + [content] + lines[section_end:]
+
+                new_content = '\n'.join(lines)
+
+            memory_file.write_text(new_content)
+            return ToolResult(True, f"Memory updated in section '{section}'")
+        except Exception as e:
+            return ToolResult(False, "", str(e))

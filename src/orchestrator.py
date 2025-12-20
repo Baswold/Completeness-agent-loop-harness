@@ -324,27 +324,14 @@ class Orchestrator:
     def _should_commit_based_on_tests(self, test_results: str, review: ReviewResult) -> bool:
         """
         Decide whether to commit based on test results and current phase.
-        
+
         Strategy:
-        - In testing phase: Always commit (Agent 2 will review test failures)
-        - In implementation phase: Only commit if tests pass or no tests exist
+        - ALWAYS commit regardless of test status to preserve progress
+        - Agent 2 will review test failures and instruct fixes in next cycle
+        - This ensures incremental progress is saved even with failing tests
         """
-        if self.state.phase == "testing":
-            # In testing phase, always commit so Agent 2 can review test failures
-            return True
-        
-        # In implementation phase, check if tests pass
-        lines = test_results.lower()
-        
-        # If tests explicitly passed, commit
-        if ("passed" in lines and "failed" not in lines) or "all tests passed" in lines:
-            return True
-        
-        # If tests failed, don't commit
-        if "failed" in lines or "error" in lines:
-            return False
-        
-        # If unclear, commit anyway (better to have Agent 2 review)
+        # Always commit to save progress, regardless of test results
+        # The agent loop will fix test failures in subsequent iterations
         return True
     
     def _init_git(self):

@@ -74,6 +74,7 @@ YOUR ROLE:
 - Create, modify, and delete files as needed
 - Run commands, tests, and install packages
 - Execute git commits when instructed
+- Save knowledge to shared memory for future iterations
 
 IMPORTANT RULES:
 1. Follow the instructions precisely - do not deviate
@@ -82,7 +83,18 @@ IMPORTANT RULES:
 4. Always run tests after making changes
 5. Report what you've done with file paths and specific changes
 
-You have access to tools for file operations, command execution, and git operations.
+MEMORY SYSTEM:
+- At the START of your work, use memory_read() to check MEMORY.md for lessons learned
+- Before FINISHING, use memory_write() to save important information:
+  - Architecture decisions and project structure
+  - Solutions to problems you encountered
+  - Common errors and how to fix them
+  - Testing strategies that work
+  - File locations and important code
+  - What the next agent should know or prioritize
+- This helps future iterations work more effectively!
+
+You have access to tools for file operations, command execution, git operations, and memory.
 Work diligently and thoroughly. Do not give up easily.
 """
 
@@ -101,6 +113,11 @@ CRITICAL RULES:
 3. Be specific: mention exact files, line numbers, function names
 4. Push for comprehensive testing - not just happy path
 5. Do not mark complete until tests pass and coverage is adequate
+
+MEMORY USAGE:
+- Check MEMORY.md to understand project context and past lessons
+- Look for patterns of repeated issues
+- Instruct Agent 1 to update memory with important findings
 
 OUTPUT FORMAT:
 ## Completeness Score: X/100
@@ -128,6 +145,8 @@ Completeness: X/100"
 
 ## Next Instructions for Agent 1:
 [Detailed, specific instructions for the next implementation cycle]
+
+IMPORTANT: Remind Agent 1 to update MEMORY.md with lessons learned before finishing.
 
 DO NOT accept incomplete work. Push for full implementation.
 """
@@ -162,6 +181,10 @@ COMMON ISSUES TO CATCH:
 - Missing error handling tests
 - No boundary condition tests
 
+MEMORY USAGE:
+- Check MEMORY.md for known testing issues and strategies
+- Instruct Agent 1 to document testing patterns in memory
+
 OUTPUT FORMAT:
 ## Test Completeness Score: X/100
 
@@ -184,6 +207,7 @@ Write the following tests:
    Expected: [expected behavior]
 
 After writing tests, RUN THEM and fix any failures.
+Then update MEMORY.md with testing insights.
 
 DO NOT accept tests without meaningful assertions.
 Push for COMPREHENSIVE test coverage.
