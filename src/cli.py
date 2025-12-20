@@ -300,6 +300,8 @@ class CompletenessREPL:
         console.print(f"  [{COLORS['cyan']}][5][/] Max cycles    {self.config.limits.max_iterations}")
         console.print(f"  [{COLORS['cyan']}][6][/] Instructions  {instr_display}")
         console.print()
+        console.print(f"  [{COLORS['success']}][Enter][/] Continue to start    [{COLORS['muted']}][9][/] More commands")
+        console.print()
     
     def prompt_for_idea(self):
         console.print()
@@ -331,11 +333,12 @@ class CompletenessREPL:
             print_success("Custom instructions saved")
     
     def settings_menu(self):
+        """Interactive settings menu shown at startup and via 'settings' command."""
         while True:
             self.print_config()
             console.print(f"  [{COLORS['cyan']}]Enter number to change, or press Enter to continue:[/]")
             console.print()
-            
+
             try:
                 choice = prompt(
                     HTML('<prompt>  ❯ </prompt>'),
@@ -343,10 +346,16 @@ class CompletenessREPL:
                 ).strip()
             except (EOFError, KeyboardInterrupt):
                 break
-            
+
             if not choice:
+                # User pressed Enter - exit settings menu
                 break
-            
+
+            if choice == "9":
+                # Show all commands
+                self.print_help()
+                continue
+
             if choice == "1":
                 if not self.idea_file:
                     self.prompt_for_idea()
@@ -354,50 +363,20 @@ class CompletenessREPL:
                     console.print(f"  [{COLORS['muted']}]Current idea file: {self.idea_file}[/]")
                     if single_input("Replace it? (y/n)", "n").lower() == "y":
                         self.prompt_for_idea()
-            
+
             elif choice == "2":
                 new_ws = single_input("Workspace path", "./workspace")
                 self.workspace = (self.base_dir / new_ws).resolve()
                 print_success(f"Workspace: {self.workspace}")
-            
+
             elif choice == "3":
-                console.print(f"  [{COLORS['muted']}]API: anthropic, ollama, lmstudio, mlx, openai, mistral, openrouter[/]")
-                console.print(f"  [{COLORS['warning']}]CLI (⚠️ uses subscription credits): claude-cli, codex, gemini[/]")
-                new_backend = single_input("Backend", self.config.model.backend)
-                self.config.model.backend = new_backend
-                print_success(f"Backend: {new_backend}")
+                # Use the new interactive backend selector
+                self.select_backend_interactive()
 
-                # Prompt for API key if switching to OpenAI, Anthropic, or OpenRouter
-                if new_backend.lower() in ("openai", "gpt", "anthropic", "claude", "openrouter"):
-                    self._prompt_for_api_key()
-            
             elif choice == "4":
-                # Provide model suggestions based on backend
-                backend = self.config.model.backend.lower()
-                if backend in ("claude-cli", "claude_cli", "claudecode", "claude-code"):
-                    console.print(f"  [{COLORS['muted']}]Models: sonnet, opus, haiku[/]")
-                elif backend in ("codex", "codex-cli", "openai-cli"):
-                    console.print(f"  [{COLORS['muted']}]Models: gpt-5-codex, gpt-5, gpt-4o[/]")
-                elif backend in ("gemini", "gemini-cli"):
-                    console.print(f"  [{COLORS['muted']}]Models: gemini-2.5-flash, gemini-2.5-pro, gemini-3-pro[/]")
-                elif backend in ("anthropic", "claude"):
-                    console.print(f"  [{COLORS['muted']}]Models: claude-3-5-sonnet-20241022, claude-3-opus-20250219, claude-3-haiku-20240307[/]")
-                elif backend in ("openai", "gpt"):
-                    console.print(f"  [{COLORS['muted']}]Models: gpt-4o, gpt-4o-mini, gpt-4-turbo[/]")
-                elif backend in ("mistral", "devstral"):
-                    console.print(f"  [{COLORS['muted']}]Models: devstral-small-2505, mistral-large-latest[/]")
-                elif backend == "openrouter":
-                    console.print(f"  [{COLORS['muted']}]Popular models:[/]")
-                    console.print(f"  [{COLORS['muted']}]  - anthropic/claude-3.5-sonnet (powerful reasoning)[/]")
-                    console.print(f"  [{COLORS['muted']}]  - google/gemini-2.0-flash-exp (fast & capable)[/]")
-                    console.print(f"  [{COLORS['muted']}]  - openai/gpt-4-turbo (GPT-4 latest)[/]")
-                    console.print(f"  [{COLORS['muted']}]  - qwen/qwen-2.5-coder-32b-instruct (coding specialist)[/]")
-                    console.print(f"  [{COLORS['muted']}]Full list: https://openrouter.ai/models[/]")
+                # Model selection with suggestions
+                self._suggest_model_for_backend(self.config.model.backend)
 
-                new_model = single_input("Model name", self.config.model.name)
-                self.config.model.name = new_model
-                print_success(f"Model: {new_model}")
-            
             elif choice == "5":
                 new_max = single_input("Max cycles", str(self.config.limits.max_iterations))
                 try:
@@ -405,7 +384,7 @@ class CompletenessREPL:
                     print_success(f"Max cycles: {new_max}")
                 except ValueError:
                     print_error("Invalid number")
-            
+
             elif choice == "6":
                 self.prompt_for_instructions()
 
@@ -769,11 +748,20 @@ Start now."""
 
         found_idea = self.auto_detect()
 
-        if found_idea:
-            self.print_config()
+        # Show settings menu at startup
+        console.print()
+        if not found_idea:
+            console.print(f"  [{COLORS['warning']}]No idea.md found. Let's set up your project:[/]")
+            console.print()
 
-        # Always show full help at startup
-        self.print_help()
+        self.settings_menu()
+
+        # After settings, user can use commands
+        console.print()
+        console.print(f"  [{COLORS['success']}]Ready to start![/] Type a command or number:")
+        console.print(f"  [{COLORS['cyan']}][1][/] go      Start building")
+        console.print(f"  [{COLORS['cyan']}][9][/] help    Show all commands")
+        console.print()
 
         while True:
             try:
