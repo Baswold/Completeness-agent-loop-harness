@@ -361,14 +361,14 @@ class CompletenessREPL:
                 print_success(f"Workspace: {self.workspace}")
             
             elif choice == "3":
-                console.print(f"  [{COLORS['muted']}]API: anthropic, ollama, lmstudio, mlx, openai, mistral[/]")
+                console.print(f"  [{COLORS['muted']}]API: anthropic, ollama, lmstudio, mlx, openai, mistral, openrouter[/]")
                 console.print(f"  [{COLORS['warning']}]CLI (⚠️ uses subscription credits): claude-cli, codex, gemini[/]")
                 new_backend = single_input("Backend", self.config.model.backend)
                 self.config.model.backend = new_backend
                 print_success(f"Backend: {new_backend}")
 
-                # Prompt for API key if switching to OpenAI or Anthropic
-                if new_backend.lower() in ("openai", "gpt", "anthropic", "claude"):
+                # Prompt for API key if switching to OpenAI, Anthropic, or OpenRouter
+                if new_backend.lower() in ("openai", "gpt", "anthropic", "claude", "openrouter"):
                     self._prompt_for_api_key()
             
             elif choice == "4":
@@ -386,6 +386,13 @@ class CompletenessREPL:
                     console.print(f"  [{COLORS['muted']}]Models: gpt-4o, gpt-4o-mini, gpt-4-turbo[/]")
                 elif backend in ("mistral", "devstral"):
                     console.print(f"  [{COLORS['muted']}]Models: devstral-small-2505, mistral-large-latest[/]")
+                elif backend == "openrouter":
+                    console.print(f"  [{COLORS['muted']}]Popular models:[/]")
+                    console.print(f"  [{COLORS['muted']}]  - anthropic/claude-3.5-sonnet (powerful reasoning)[/]")
+                    console.print(f"  [{COLORS['muted']}]  - google/gemini-2.0-flash-exp (fast & capable)[/]")
+                    console.print(f"  [{COLORS['muted']}]  - openai/gpt-4-turbo (GPT-4 latest)[/]")
+                    console.print(f"  [{COLORS['muted']}]  - qwen/qwen-2.5-coder-32b-instruct (coding specialist)[/]")
+                    console.print(f"  [{COLORS['muted']}]Full list: https://openrouter.ai/models[/]")
 
                 new_model = single_input("Model name", self.config.model.name)
                 self.config.model.name = new_model
@@ -418,6 +425,11 @@ class CompletenessREPL:
             config_key = "openai_api_key"
             service_name = "OpenAI"
             service_url = "https://platform.openai.com/api-keys"
+        elif backend == "openrouter":
+            env_var = "OPENROUTER_API_KEY"
+            config_key = "openrouter_api_key"
+            service_name = "OpenRouter"
+            service_url = "https://openrouter.ai/"
         else:
             return
 

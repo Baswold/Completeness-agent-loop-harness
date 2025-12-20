@@ -494,6 +494,145 @@ class MistralBackend(LLMBackend):
             )
 
 
+class OpenRouterBackend(LLMBackend):
+    """
+    OpenRouter API backend - OpenAI-compatible API with access to 100+ models
+    Default: https://openrouter.ai/api/v1
+
+    Setup:
+        1. Get API key from https://openrouter.ai/
+        2. Set environment variable: export OPENROUTER_API_KEY="your-key"
+        3. Use any model from their catalog (e.g., anthropic/claude-3.5-sonnet)
+
+    Popular models:
+        - anthropic/claude-3.5-sonnet: Powerful reasoning and coding
+        - anthropic/claude-3-opus: Most capable Claude model
+        - google/gemini-2.0-flash-exp: Fast and capable
+        - openai/gpt-4-turbo: Latest GPT-4 Turbo
+        - meta-llama/llama-3.1-405b-instruct: Open source flagship
+        - qwen/qwen-2.5-coder-32b-instruct: Specialized coding model
+
+    See full model list: https://openrouter.ai/models
+    """
+    def __init__(self, model: str = "anthropic/claude-3.5-sonnet"):
+        import os
+
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OPENROUTER_API_KEY environment variable not set.\n"
+                "Get your API key from https://openrouter.ai/\n"
+                "Then run: export OPENROUTER_API_KEY='your-key'"
+            )
+
+        self.model = model
+        self.api_key = api_key
+        self.base_url = "https://openrouter.ai/api/v1"
+        self.client = httpx.Client(timeout=300.0)
+
+    def get_info(self) -> str:
+        return f"OpenRouter ({self.model}) @ {self.base_url}"
+
+    def supports_tools(self) -> bool:
+        return True
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        tools: Optional[List[Dict]] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> LLMResponse:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://github.com/Baswold/Completeness-agent-loop-harness",  # Optional, for rankings
+            "X-Title": "Completeness Agent Loop"  # Optional, for rankings
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        if tools:
+            payload["tools"] = tools
+
+        try:
+            response = self.client.post(
+                f"{self.base_url}/chat/completions",
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            usage_data = data.get("usage", {})
+
+            tool_calls = []
+            if "tool_calls" in message:
+                tool_calls = message.get("tool_calls", [])
+
+            return LLMResponse(
+                content=message.get("content", "") or "",
+                tool_calls=tool_calls,
+                usage=TokenUsage(
+                    prompt_tokens=usage_data.get("prompt_tokens", 0),
+                    completion_tokens=usage_data.get("completion_tokens", 0),
+                    total_tokens=usage_data.get("total_tokens", 0)
+                ),
+                finish_reason=choice.get("finish_reason", "stop")
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                return LLMResponse(
+                    content="Error: Invalid OpenRouter API key. Check your OPENROUTER_API_KEY environment variable.",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+            elif e.response.status_code == 429:
+                return LLMResponse(
+                    content="Error: Rate limited by OpenRouter API. Please wait and retry.",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+            elif e.response.status_code == 402:
+                return LLMResponse(
+                    content="Error: Insufficient credits in OpenRouter account. Please add credits at https://openrouter.ai/",
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+            else:
+                error_msg = f"Error: OpenRouter API returned status {e.response.status_code}"
+                try:
+                    error_data = e.response.json()
+                    if "error" in error_data:
+                        error_msg += f": {error_data['error'].get('message', '')}"
+                except:
+                    pass
+                return LLMResponse(
+                    content=error_msg,
+                    usage=TokenUsage(),
+                    finish_reason="error"
+                )
+        except httpx.ConnectError:
+            return LLMResponse(
+                content="Error: Cannot connect to OpenRouter API. Check your internet connection.",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+        except Exception as e:
+            return LLMResponse(
+                content=f"Error calling OpenRouter API: {str(e)}",
+                usage=TokenUsage(),
+                finish_reason="error"
+            )
+
+
 class AnthropicBackend(LLMBackend):
     """
     Anthropic Claude API backend.
@@ -1078,6 +1217,7 @@ BACKEND_ALIASES = {
     "claude": "anthropic",
     "mistral": "mistral",
     "devstral": "mistral",
+    "openrouter": "openrouter",
     "http": "http",
     # CLI backends
     "claude-cli": "claude-cli",
@@ -1107,6 +1247,7 @@ def create_backend(config) -> LLMBackend:
         - anthropic: Anthropic Claude API (uses ANTHROPIC_API_KEY)
         - mistral: Mistral AI API (uses MISTRAL_API_KEY)
         - openai: OpenAI API (uses Replit AI Integrations or OPENAI_API_KEY)
+        - openrouter: OpenRouter API (uses OPENROUTER_API_KEY) - 100+ models
         - ollama: Ollama local server (default: localhost:11434)
         - lmstudio: LM Studio local server (default: localhost:1234)
         - mlx: Native Apple Silicon with mlx-lm
@@ -1126,6 +1267,9 @@ def create_backend(config) -> LLMBackend:
 
     elif backend_type == "mistral":
         return MistralBackend(model=config.model.name)
+
+    elif backend_type == "openrouter":
+        return OpenRouterBackend(model=config.model.name)
 
     elif backend_type == "ollama":
         base_url = config.model.base_url or DEFAULT_URLS["ollama"]
@@ -1162,7 +1306,7 @@ def create_backend(config) -> LLMBackend:
     else:
         raise ValueError(
             f"Unknown backend: {backend_type}\n"
-            f"Supported API backends: anthropic, mistral, openai, ollama, lmstudio, mlx, http\n"
+            f"Supported API backends: anthropic, mistral, openai, openrouter, ollama, lmstudio, mlx, http\n"
             f"Supported CLI backends: claude-cli, codex, gemini"
         )
 
@@ -1197,7 +1341,18 @@ API BACKENDS (use API keys):
    Models: gpt-4o, gpt-4o-mini, gpt-4.1, o3-mini, etc.
    Uses Replit AI Integrations (no API key needed!)
 
-4. Ollama (local LLM server)
+4. OpenRouter (100+ models, one API key)
+   Backend: openrouter
+   Models: anthropic/claude-3.5-sonnet, google/gemini-2.0-flash-exp, openai/gpt-4-turbo,
+           qwen/qwen-2.5-coder-32b-instruct, meta-llama/llama-3.1-405b-instruct, etc.
+   Setup:
+     1. Get API key from https://openrouter.ai/
+     2. export OPENROUTER_API_KEY="your-key"
+     3. Set in config: backend=openrouter, name=anthropic/claude-3.5-sonnet
+   Note: Access to 100+ models including Claude, GPT-4, Gemini, Llama, and more!
+         See full list: https://openrouter.ai/models
+
+5. Ollama (local LLM server)
    Backend: ollama
    Default URL: http://localhost:11434
    Setup:
@@ -1205,7 +1360,7 @@ API BACKENDS (use API keys):
      ollama pull devstral
      ollama serve
 
-5. LM Studio (great GUI, easy model management)
+6. LM Studio (great GUI, easy model management)
    Backend: lmstudio
    Default URL: http://localhost:1234
    Setup:
@@ -1213,12 +1368,12 @@ API BACKENDS (use API keys):
      2. Load a coding model (Devstral, CodeLlama, etc.)
      3. Start local server
 
-6. MLX (native Apple Silicon, fastest on Mac)
+7. MLX (native Apple Silicon, fastest on Mac)
    Backend: mlx
    Requires: pip install mlx-lm
    Note: Model downloaded automatically on first run
 
-7. HTTP (any OpenAI-compatible API)
+8. HTTP (any OpenAI-compatible API)
    Backend: http
    Requires: base_url in config
    Works with: vLLM, text-generation-inference, etc.
@@ -1229,7 +1384,7 @@ CLI BACKENDS (use subscription credits):
 ⚠️  Autonomous agent loops can consume credits VERY QUICKLY!
 ⚠️  Only use CLI backends if you understand the cost implications!
 
-8. Claude Code CLI (Anthropic Pro/Plus subscription)
+9. Claude Code CLI (Anthropic Pro/Plus subscription)
    Backend: claude-cli
    Models: sonnet (recommended), opus, haiku
    Setup:
@@ -1241,18 +1396,18 @@ CLI BACKENDS (use subscription credits):
      - Auto-approves tools with --dangerously-skip-permissions
      - Monitor usage: https://console.anthropic.com/
 
-9. OpenAI Codex CLI (ChatGPT Pro/Plus subscription)
-   Backend: codex
-   Models: gpt-5-codex (recommended), gpt-5, gpt-4o
-   Setup:
-     1. Install: npm i -g @openai/codex OR brew install codex
-     2. codex (authenticate on first run)
-     3. Set in config: backend=codex, name=gpt-5-codex
-   Features:
-     - Uses ChatGPT Pro/Plus/Business subscription
-     - Monitor usage in ChatGPT account settings
+10. OpenAI Codex CLI (ChatGPT Pro/Plus subscription)
+    Backend: codex
+    Models: gpt-5-codex (recommended), gpt-5, gpt-4o
+    Setup:
+      1. Install: npm i -g @openai/codex OR brew install codex
+      2. codex (authenticate on first run)
+      3. Set in config: backend=codex, name=gpt-5-codex
+    Features:
+      - Uses ChatGPT Pro/Plus/Business subscription
+      - Monitor usage in ChatGPT account settings
 
-10. Google Gemini CLI (AI Studio credits)
+11. Google Gemini CLI (AI Studio credits)
     Backend: gemini
     Models: gemini-2.5-flash (recommended), gemini-2.5-pro, gemini-3-pro
     Setup:
@@ -1266,7 +1421,7 @@ CLI BACKENDS (use subscription credits):
 
 CHOOSING A BACKEND:
 -------------------
-- For API usage: Use 'anthropic', 'mistral', or 'openai' for production
+- For API usage: Use 'anthropic', 'mistral', 'openai', or 'openrouter' for production
 - For local development: Use 'ollama' or 'lmstudio'
 - For Mac users: 'mlx' offers native Apple Silicon performance
 - For CLI (Pro subscriptions): Use 'claude-cli', 'codex', or 'gemini'
