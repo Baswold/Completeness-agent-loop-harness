@@ -123,7 +123,7 @@ def copy_idea_to_workspace(idea_file: Path, workspace: Path):
     return dest
 
 
-def print_cycle_result(result: CycleResult, phase: str, state=None):
+def print_cycle_result(result: CycleResult, phase: str, state=None, expanded: bool = False):
     console.print()
 
     phase_color = COLORS["cyan"] if phase == "implementation" else COLORS["purple"]
@@ -155,7 +155,35 @@ def print_cycle_result(result: CycleResult, phase: str, state=None):
         # Show cumulative metrics when cycle-specific ones aren't available
         tokens = state.total_agent2_usage.total_tokens
         content.append(f"\nReviewer      {tokens:,} tokens (cumulative)")
-    
+
+    # Expanded mode: show full agent outputs and tool details
+    if expanded:
+        content.append("\n\n" + "─" * 40)
+
+        if result.agent1_response:
+            content.append("\n\n[bold cyan]Agent 1 Output:[/]")
+            agent1_output = result.agent1_response.content[:1000]  # Limit to first 1000 chars
+            if len(result.agent1_response.content) > 1000:
+                agent1_output += "\n... (truncated)"
+            content.append(f"\n{agent1_output}")
+
+            if result.agent1_response.tool_calls_made:
+                content.append("\n\n[bold cyan]Tool Calls:[/]")
+                for i, call in enumerate(result.agent1_response.tool_calls_made[:5], 1):
+                    content.append(f"\n  {i}. {call.get('name', 'unknown')}")
+
+        if result.agent2_review:
+            content.append("\n\n[bold purple]Agent 2 Review:[/]")
+            review_output = result.agent2_review.raw_content[:800]  # Limit to first 800 chars
+            if len(result.agent2_review.raw_content) > 800:
+                review_output += "\n... (truncated)"
+            content.append(f"\n{review_output}")
+
+        content.append("\n\n" + "─" * 40)
+        content.append("\n[dim]Tip: Type 'expand' to toggle expanded view[/]")
+    else:
+        content.append("\n[dim]Type 'expand' to see full output[/]")
+
     border_color = COLORS["success"] if result.completeness_score >= 90 else COLORS["primary"]
     
     console.print(Panel(
@@ -182,9 +210,9 @@ def print_cycle_result(result: CycleResult, phase: str, state=None):
     console.print()
 
 
-def print_final_summary(status: dict, elapsed: float):
+def print_final_summary(status: dict, elapsed: float, orchestrator=None):
     console.print()
-    
+
     if status["is_complete"]:
         state_label = "COMPLETE"
         state_color = COLORS["success"]
@@ -197,7 +225,7 @@ def print_final_summary(status: dict, elapsed: float):
         state_label = "STOPPED"
         state_color = COLORS["muted"]
         icon = "■"
-    
+
     content = Text()
     content.append(f"{icon} ", style=f"bold {state_color}")
     content.append(state_label, style=f"bold {state_color}")
@@ -208,7 +236,7 @@ def print_final_summary(status: dict, elapsed: float):
     content.append(f"\nCycles    {status['cycle_count']}")
     content.append(f"\nRuntime   {format_duration(elapsed)}")
     content.append(f"\nTokens    {status['total_tokens']:,}")
-    
+
     console.print(Panel(
         content,
         title="Session Summary",
@@ -216,6 +244,55 @@ def print_final_summary(status: dict, elapsed: float):
         box=box.DOUBLE,
     ))
     console.print()
+
+    # Display "Wrapped" - tool usage statistics
+    if orchestrator:
+        print_tool_wrapped(orchestrator)
+
+
+def print_tool_wrapped(orchestrator):
+    """Display Spotify-Wrapped-style tool usage statistics."""
+    console.print(Panel(
+        "[bold]🎁 Session Wrapped[/]\nYour agents' favorite tools",
+        border_style=COLORS["primary"],
+        box=box.ROUNDED
+    ))
+    console.print()
+
+    # Get tool usage from both agents
+    agent1_stats = orchestrator.agent1_tools.get_tool_usage_stats()
+    agent2_stats = orchestrator.agent2_tools.get_tool_usage_stats()
+
+    # Display Agent 1 stats
+    if agent1_stats:
+        console.print(f"  [{COLORS['cyan']}]Agent 1 (Implementation) - Top Tools:[/]")
+        for i, (tool_name, count) in enumerate(agent1_stats[:5], 1):
+            # Add emoji indicators
+            if i == 1:
+                emoji = "🥇"
+            elif i == 2:
+                emoji = "🥈"
+            elif i == 3:
+                emoji = "🥉"
+            else:
+                emoji = "  "
+            console.print(f"    {emoji} [{COLORS['success']}]{tool_name:20}[/] {count:3} uses")
+        console.print()
+
+    # Display Agent 2 stats
+    if agent2_stats:
+        console.print(f"  [{COLORS['purple']}]Agent 2 (Review) - Top Tools:[/]")
+        for i, (tool_name, count) in enumerate(agent2_stats[:5], 1):
+            if i == 1:
+                emoji = "🥇"
+            elif i == 2:
+                emoji = "🥈"
+            elif i == 3:
+                emoji = "🥉"
+            else:
+                emoji = "  "
+            console.print(f"    {emoji} [{COLORS['success']}]{tool_name:20}[/] {count:3} uses")
+        console.print()
 
 
 def multiline_input(prompt_text: str, hint: str = "") -> str:
@@ -272,6 +349,8 @@ class CompletenessREPL:
         self.running = False
         self.history = InMemoryHistory()
         self.custom_instructions = ""
+        self.last_cycle_result: Optional[CycleResult] = None
+        self.show_expanded = False  # Toggle for expanded output
     
     def get_prompt_text(self):
         return HTML('<prompt>❯ </prompt>')
@@ -299,6 +378,8 @@ class CompletenessREPL:
         console.print(f"  [{COLORS['cyan']}][4][/] Model         {self.config.model.name}")
         console.print(f"  [{COLORS['cyan']}][5][/] Max cycles    {self.config.limits.max_iterations}")
         console.print(f"  [{COLORS['cyan']}][6][/] Instructions  {instr_display}")
+        console.print()
+        console.print(f"  [{COLORS['success']}][Enter][/] Continue to start    [{COLORS['muted']}][9][/] More commands")
         console.print()
     
     def prompt_for_idea(self):
@@ -331,11 +412,12 @@ class CompletenessREPL:
             print_success("Custom instructions saved")
     
     def settings_menu(self):
+        """Interactive settings menu shown at startup and via 'settings' command."""
         while True:
             self.print_config()
             console.print(f"  [{COLORS['cyan']}]Enter number to change, or press Enter to continue:[/]")
             console.print()
-            
+
             try:
                 choice = prompt(
                     HTML('<prompt>  ❯ </prompt>'),
@@ -343,10 +425,16 @@ class CompletenessREPL:
                 ).strip()
             except (EOFError, KeyboardInterrupt):
                 break
-            
+
             if not choice:
+                # User pressed Enter - exit settings menu
                 break
-            
+
+            if choice == "9":
+                # Show all commands
+                self.print_help()
+                continue
+
             if choice == "1":
                 if not self.idea_file:
                     self.prompt_for_idea()
@@ -354,50 +442,20 @@ class CompletenessREPL:
                     console.print(f"  [{COLORS['muted']}]Current idea file: {self.idea_file}[/]")
                     if single_input("Replace it? (y/n)", "n").lower() == "y":
                         self.prompt_for_idea()
-            
+
             elif choice == "2":
                 new_ws = single_input("Workspace path", "./workspace")
                 self.workspace = (self.base_dir / new_ws).resolve()
                 print_success(f"Workspace: {self.workspace}")
-            
+
             elif choice == "3":
-                console.print(f"  [{COLORS['muted']}]API: anthropic, ollama, lmstudio, mlx, openai, mistral, openrouter[/]")
-                console.print(f"  [{COLORS['warning']}]CLI (⚠️ uses subscription credits): claude-cli, codex, gemini[/]")
-                new_backend = single_input("Backend", self.config.model.backend)
-                self.config.model.backend = new_backend
-                print_success(f"Backend: {new_backend}")
+                # Use the new interactive backend selector
+                self.select_backend_interactive()
 
-                # Prompt for API key if switching to OpenAI, Anthropic, or OpenRouter
-                if new_backend.lower() in ("openai", "gpt", "anthropic", "claude", "openrouter"):
-                    self._prompt_for_api_key()
-            
             elif choice == "4":
-                # Provide model suggestions based on backend
-                backend = self.config.model.backend.lower()
-                if backend in ("claude-cli", "claude_cli", "claudecode", "claude-code"):
-                    console.print(f"  [{COLORS['muted']}]Models: sonnet, opus, haiku[/]")
-                elif backend in ("codex", "codex-cli", "openai-cli"):
-                    console.print(f"  [{COLORS['muted']}]Models: gpt-5-codex, gpt-5, gpt-4o[/]")
-                elif backend in ("gemini", "gemini-cli"):
-                    console.print(f"  [{COLORS['muted']}]Models: gemini-2.5-flash, gemini-2.5-pro, gemini-3-pro[/]")
-                elif backend in ("anthropic", "claude"):
-                    console.print(f"  [{COLORS['muted']}]Models: claude-3-5-sonnet-20241022, claude-3-opus-20250219, claude-3-haiku-20240307[/]")
-                elif backend in ("openai", "gpt"):
-                    console.print(f"  [{COLORS['muted']}]Models: gpt-4o, gpt-4o-mini, gpt-4-turbo[/]")
-                elif backend in ("mistral", "devstral"):
-                    console.print(f"  [{COLORS['muted']}]Models: devstral-small-2505, mistral-large-latest[/]")
-                elif backend == "openrouter":
-                    console.print(f"  [{COLORS['muted']}]Popular models:[/]")
-                    console.print(f"  [{COLORS['muted']}]  - anthropic/claude-3.5-sonnet (powerful reasoning)[/]")
-                    console.print(f"  [{COLORS['muted']}]  - google/gemini-2.0-flash-exp (fast & capable)[/]")
-                    console.print(f"  [{COLORS['muted']}]  - openai/gpt-4-turbo (GPT-4 latest)[/]")
-                    console.print(f"  [{COLORS['muted']}]  - qwen/qwen-2.5-coder-32b-instruct (coding specialist)[/]")
-                    console.print(f"  [{COLORS['muted']}]Full list: https://openrouter.ai/models[/]")
+                # Model selection with suggestions
+                self._suggest_model_for_backend(self.config.model.backend)
 
-                new_model = single_input("Model name", self.config.model.name)
-                self.config.model.name = new_model
-                print_success(f"Model: {new_model}")
-            
             elif choice == "5":
                 new_max = single_input("Max cycles", str(self.config.limits.max_iterations))
                 try:
@@ -405,7 +463,7 @@ class CompletenessREPL:
                     print_success(f"Max cycles: {new_max}")
                 except ValueError:
                     print_error("Invalid number")
-            
+
             elif choice == "6":
                 self.prompt_for_instructions()
 
@@ -535,12 +593,13 @@ Start now."""
     
     def _run_loop(self, idea_path: Path, workspace_path: Path, resume: bool = False, initial_prompt: str = ""):
         start_time = time.time()
-        
+
         def on_cycle(result: CycleResult):
+            self.last_cycle_result = result  # Save for expand command
             phase = self.orchestrator.state.phase if self.orchestrator else "implementation"
             state = self.orchestrator.state if self.orchestrator else None
-            print_cycle_result(result, phase, state)
-        
+            print_cycle_result(result, phase, state, expanded=self.show_expanded)
+
         def on_status(status: str):
             print_info(status)
         
@@ -576,7 +635,7 @@ Start now."""
         
         self.running = False
         status = self.orchestrator.get_status()
-        print_final_summary(status, time.time() - start_time)
+        print_final_summary(status, time.time() - start_time, self.orchestrator)
     
     def cmd_status(self):
         if not self.workspace:
@@ -637,7 +696,22 @@ Start now."""
         
         console.print(table)
         console.print()
-    
+
+    def cmd_expand(self):
+        """Toggle expanded view and show last cycle details."""
+        if not self.last_cycle_result:
+            print_info("No cycle results available yet. Run 'go' first.")
+            return
+
+        self.show_expanded = not self.show_expanded
+        mode = "expanded" if self.show_expanded else "collapsed"
+        print_info(f"View toggled to {mode}")
+
+        # Re-display the last cycle result with new expanded setting
+        phase = self.orchestrator.state.phase if self.orchestrator else "implementation"
+        state = self.orchestrator.state if self.orchestrator else None
+        print_cycle_result(self.last_cycle_result, phase, state, expanded=self.show_expanded)
+
     def cmd_backends(self):
         console.print()
         console.print(Panel(
@@ -674,6 +748,9 @@ Start now."""
         console.print(f"  [{COLORS['cyan']}][8] backends[/]     List all available backends")
         console.print(f"  [{COLORS['cyan']}][9] help[/]         Show this help")
         console.print(f"  [{COLORS['cyan']}][0] quit[/]         Exit the program")
+        console.print()
+        console.print(f"  [{COLORS['muted']}]Other commands:[/]")
+        console.print(f"  [{COLORS['cyan']}]expand[/]           Toggle expanded/collapsed cycle output view")
         console.print()
 
     def select_backend_interactive(self):
@@ -769,11 +846,20 @@ Start now."""
 
         found_idea = self.auto_detect()
 
-        if found_idea:
-            self.print_config()
+        # Show settings menu at startup
+        console.print()
+        if not found_idea:
+            console.print(f"  [{COLORS['warning']}]No idea.md found. Let's set up your project:[/]")
+            console.print()
 
-        # Always show full help at startup
-        self.print_help()
+        self.settings_menu()
+
+        # After settings, user can use commands
+        console.print()
+        console.print(f"  [{COLORS['success']}]Ready to start![/] Type a command or number:")
+        console.print(f"  [{COLORS['cyan']}][1][/] go      Start building")
+        console.print(f"  [{COLORS['cyan']}][9][/] help    Show all commands")
+        console.print()
 
         while True:
             try:
@@ -835,6 +921,8 @@ Start now."""
                 self.cmd_config()
             elif cmd == "help":
                 self.print_help()
+            elif cmd in ("expand", "e"):
+                self.cmd_expand()
             else:
                 print_error(f"Unknown command: {cmd}")
                 console.print(f"  [{COLORS['muted']}]Type 'help' or '9' for available commands[/]")
