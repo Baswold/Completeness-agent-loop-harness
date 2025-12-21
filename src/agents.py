@@ -187,8 +187,12 @@ IMPORTANT: Before finishing your review, use memory_write() to save any importan
         if response.tool_calls and self.tools:
             for tool_call in response.tool_calls:
                 if tool_call.get('function', {}).get('name') in ['memory_write']:
-                    args = json.loads(tool_call['function']['arguments'])
-                    self.tools.execute('memory_write', args)
+                    try:
+                        args = json.loads(tool_call['function']['arguments'])
+                        self.tools.execute('memory_write', args)
+                    except (json.JSONDecodeError, KeyError, TypeError) as e:
+                        # Silently skip malformed tool calls - Agent2's review is more important
+                        pass
 
         return ReviewResult.parse(response.content, response.usage)
 
@@ -222,17 +226,21 @@ class ReviewResult:
             line_lower = line.lower().strip()
 
             # More robust score parsing - handle multiple formats
-            if "completeness" in line_lower and ("score" in line_lower or ":" in line_lower):
+            # Check for "completeness" + any number in the same line or nearby
+            if "completeness" in line_lower or "complete" in line_lower and current_section != "completed":
                 import re
-                # Try to find patterns like "X/100", "X%", or just "X"
+                # Try to find patterns like "X/100", "X%", ": X", or just "X"
                 match = re.search(r"(\d+)\s*/\s*100", line) or \
                         re.search(r"(\d+)\s*%", line) or \
                         re.search(r":\s*(\d+)", line) or \
-                        re.search(r"(\d+)", line)
+                        re.search(r"\b(\d+)\b", line)  # Any standalone number
                 if match:
-                    score = int(match.group(1))
-                current_section = "score"
-                continue
+                    potential_score = int(match.group(1))
+                    # Only accept scores 0-100
+                    if 0 <= potential_score <= 100:
+                        score = potential_score
+                        current_section = "score"
+                        continue
             elif "what was just completed" in line_lower or "completed:" in line_lower:
                 current_section = "completed"
                 continue
