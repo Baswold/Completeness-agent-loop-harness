@@ -20,6 +20,8 @@ class ToolRegistry:
         self.agent_name = agent_name  # "agent1" or "agent2"
         self._tools: Dict[str, Callable] = {}
         self._schemas: Dict[str, Dict] = {}
+        self._submitted_instructions: Optional[str] = None  # For Agent 2's instruction submission
+        self._tool_usage_counts: Dict[str, int] = {}  # Track tool usage for wrapped feature
         self._register_default_tools()
     
     def _register_default_tools(self):
@@ -296,7 +298,31 @@ class ToolRegistry:
                 }
             }
         })
-    
+
+        # Agent 2 only: Tool to submit next instructions for Agent 1
+        if self.agent_name == "agent2":
+            self.register("submit_next_instructions", self._submit_next_instructions, {
+                "type": "function",
+                "function": {
+                    "name": "submit_next_instructions",
+                    "description": "Submit the next implementation instructions for Agent 1. Use this to provide VERY CLEAR, SPECIFIC, NUMBERED steps for what Agent 1 should do next. Be extremely detailed and actionable - Agent 1 will follow these instructions exactly.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "instructions": {
+                                "type": "string",
+                                "description": "Detailed, numbered step-by-step instructions for Agent 1. Each step should be specific and actionable. Example format:\n1. Create file X with Y content\n2. Modify function Z to do W\n3. Add test for feature Q\n4. Run tests with command R"
+                            },
+                            "completeness_score": {
+                                "type": "integer",
+                                "description": "Completeness score from 0-100 indicating how complete the project is"
+                            }
+                        },
+                        "required": ["instructions", "completeness_score"]
+                    }
+                }
+            })
+
     def register(self, name: str, func: Callable, schema: Dict):
         self._tools[name] = func
         self._schemas[name] = schema
@@ -307,7 +333,10 @@ class ToolRegistry:
     def execute(self, name: str, arguments: Dict[str, Any]) -> ToolResult:
         if name not in self._tools:
             return ToolResult(False, "", f"Unknown tool: {name}")
-        
+
+        # Track tool usage for wrapped feature
+        self._tool_usage_counts[name] = self._tool_usage_counts.get(name, 0) + 1
+
         try:
             return self._tools[name](**arguments)
         except Exception as e:
@@ -606,3 +635,31 @@ Use it to remember patterns and issues you've observed.
             return ToolResult(True, f"Memory updated in section '{section}' ({self.agent_name})")
         except Exception as e:
             return ToolResult(False, "", str(e))
+
+    def _submit_next_instructions(self, instructions: str, completeness_score: int) -> ToolResult:
+        """Agent 2 submits next instructions for Agent 1."""
+        try:
+            # Store the instructions and score so orchestrator can retrieve them
+            self._submitted_instructions = instructions
+            self._submitted_score = completeness_score
+
+            return ToolResult(
+                True,
+                f"✓ Instructions submitted successfully (Score: {completeness_score}/100)\n\n"
+                "Now save your observations to memory using memory_write() before finishing.\n"
+                "Document patterns you noticed, testing gaps, code quality issues, etc."
+            )
+        except Exception as e:
+            return ToolResult(False, "", str(e))
+
+    def get_submitted_instructions(self) -> Optional[str]:
+        """Retrieve instructions submitted by Agent 2."""
+        return self._submitted_instructions
+
+    def get_submitted_score(self) -> Optional[int]:
+        """Retrieve completeness score submitted by Agent 2."""
+        return getattr(self, '_submitted_score', None)
+
+    def get_tool_usage_stats(self) -> List[tuple]:
+        """Get tool usage statistics sorted by count (for wrapped feature)."""
+        return sorted(self._tool_usage_counts.items(), key=lambda x: x[1], reverse=True)

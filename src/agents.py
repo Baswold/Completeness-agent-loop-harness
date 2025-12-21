@@ -159,23 +159,16 @@ class Agent2:
 ## GIT LOG (Recent Commits)
 {git_log}
 
-Review the codebase against the specification. Rate completeness and provide specific next instructions.
-Do NOT trust claims in commit messages - verify everything in the actual code.
-
-IMPORTANT: Before finishing your review, use memory_write() to save any important observations about:
-- Patterns of incompleteness you've noticed
-- Testing gaps that keep recurring
-- Code quality issues to watch for
-- Parts of the spec that keep being missed
+Review the codebase and use submit_next_instructions() to provide Agent 1 with clear, numbered steps.
 """
         messages.append({"role": "user", "content": user_content})
 
-        # Get tool schemas for memory operations only
+        # Get tool schemas for review operations
         tool_schemas = None
         if self.tools and self.llm.supports_tools():
-            # Filter to only memory tools
+            # Filter to review-specific tools
             all_schemas = self.tools.get_schemas()
-            tool_schemas = [s for s in all_schemas if s['function']['name'] in ['memory_read', 'memory_write']]
+            tool_schemas = [s for s in all_schemas if s['function']['name'] in ['memory_read', 'memory_write', 'submit_next_instructions']]
 
         response = self.llm.generate(
             messages=messages,
@@ -183,18 +176,56 @@ IMPORTANT: Before finishing your review, use memory_write() to save any importan
             max_tokens=4096
         )
 
-        # If Agent2 made tool calls (memory writes), execute them
+        # Execute tool calls from Agent2
         if response.tool_calls and self.tools:
             for tool_call in response.tool_calls:
-                if tool_call.get('function', {}).get('name') in ['memory_write']:
+                tool_name = tool_call.get('function', {}).get('name')
+                if tool_name in ['submit_next_instructions', 'memory_write']:
                     try:
                         args = json.loads(tool_call['function']['arguments'])
-                        self.tools.execute('memory_write', args)
-                    except (json.JSONDecodeError, KeyError, TypeError) as e:
-                        # Silently skip malformed tool calls - Agent2's review is more important
+                        result = self.tools.execute(tool_name, args)
+                        # For submit_next_instructions, add the tool result to messages
+                        # so Agent2 sees the prompt to save memories
+                        if tool_name == 'submit_next_instructions' and result.success:
+                            messages.append({
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [tool_call]
+                            })
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.get("id", "call_1"),
+                                "content": result.output
+                            })
+                            # Give Agent2 a chance to save memories
+                            follow_up = self.llm.generate(
+                                messages=messages,
+                                tools=tool_schemas,
+                                max_tokens=2048
+                            )
+                            # Execute any memory_write calls from follow-up
+                            if follow_up.tool_calls:
+                                for fc in follow_up.tool_calls:
+                                    if fc.get('function', {}).get('name') == 'memory_write':
+                                        try:
+                                            args = json.loads(fc['function']['arguments'])
+                                            self.tools.execute('memory_write', args)
+                                        except:
+                                            pass
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        # Silently skip malformed tool calls
                         pass
 
-        return ReviewResult.parse(response.content, response.usage)
+        # Get submitted instructions and score from tools
+        submitted_instructions = self.tools.get_submitted_instructions() if self.tools else None
+        submitted_score = self.tools.get_submitted_score() if self.tools else None
+
+        return ReviewResult.from_submission(
+            content=response.content,
+            usage=response.usage,
+            submitted_instructions=submitted_instructions,
+            submitted_score=submitted_score
+        )
 
 
 @dataclass
@@ -291,3 +322,28 @@ class ReviewResult:
             usage=usage,
             is_complete=is_complete
         )
+
+    @classmethod
+    def from_submission(
+        cls,
+        content: str,
+        usage: TokenUsage,
+        submitted_instructions: Optional[str],
+        submitted_score: Optional[int]
+    ) -> "ReviewResult":
+        """Create ReviewResult from Agent2's tool submission."""
+        # If Agent2 used the tool, use those values
+        if submitted_instructions and submitted_score is not None:
+            return cls(
+                raw_content=content,
+                completeness_score=submitted_score,
+                completed_items=[],
+                remaining_work=[],
+                issues_found=[],
+                commit_instructions="",
+                next_instructions=submitted_instructions,
+                usage=usage,
+                is_complete=submitted_score >= 95
+            )
+        # Otherwise fall back to parsing
+        return cls.parse(content, usage)

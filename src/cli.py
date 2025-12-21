@@ -210,9 +210,9 @@ def print_cycle_result(result: CycleResult, phase: str, state=None, expanded: bo
     console.print()
 
 
-def print_final_summary(status: dict, elapsed: float):
+def print_final_summary(status: dict, elapsed: float, orchestrator=None):
     console.print()
-    
+
     if status["is_complete"]:
         state_label = "COMPLETE"
         state_color = COLORS["success"]
@@ -225,7 +225,7 @@ def print_final_summary(status: dict, elapsed: float):
         state_label = "STOPPED"
         state_color = COLORS["muted"]
         icon = "■"
-    
+
     content = Text()
     content.append(f"{icon} ", style=f"bold {state_color}")
     content.append(state_label, style=f"bold {state_color}")
@@ -236,7 +236,7 @@ def print_final_summary(status: dict, elapsed: float):
     content.append(f"\nCycles    {status['cycle_count']}")
     content.append(f"\nRuntime   {format_duration(elapsed)}")
     content.append(f"\nTokens    {status['total_tokens']:,}")
-    
+
     console.print(Panel(
         content,
         title="Session Summary",
@@ -244,6 +244,55 @@ def print_final_summary(status: dict, elapsed: float):
         box=box.DOUBLE,
     ))
     console.print()
+
+    # Display "Wrapped" - tool usage statistics
+    if orchestrator:
+        print_tool_wrapped(orchestrator)
+
+
+def print_tool_wrapped(orchestrator):
+    """Display Spotify-Wrapped-style tool usage statistics."""
+    console.print(Panel(
+        "[bold]🎁 Session Wrapped[/]\nYour agents' favorite tools",
+        border_style=COLORS["primary"],
+        box=box.ROUNDED
+    ))
+    console.print()
+
+    # Get tool usage from both agents
+    agent1_stats = orchestrator.agent1_tools.get_tool_usage_stats()
+    agent2_stats = orchestrator.agent2_tools.get_tool_usage_stats()
+
+    # Display Agent 1 stats
+    if agent1_stats:
+        console.print(f"  [{COLORS['cyan']}]Agent 1 (Implementation) - Top Tools:[/]")
+        for i, (tool_name, count) in enumerate(agent1_stats[:5], 1):
+            # Add emoji indicators
+            if i == 1:
+                emoji = "🥇"
+            elif i == 2:
+                emoji = "🥈"
+            elif i == 3:
+                emoji = "🥉"
+            else:
+                emoji = "  "
+            console.print(f"    {emoji} [{COLORS['success']}]{tool_name:20}[/] {count:3} uses")
+        console.print()
+
+    # Display Agent 2 stats
+    if agent2_stats:
+        console.print(f"  [{COLORS['purple']}]Agent 2 (Review) - Top Tools:[/]")
+        for i, (tool_name, count) in enumerate(agent2_stats[:5], 1):
+            if i == 1:
+                emoji = "🥇"
+            elif i == 2:
+                emoji = "🥈"
+            elif i == 3:
+                emoji = "🥉"
+            else:
+                emoji = "  "
+            console.print(f"    {emoji} [{COLORS['success']}]{tool_name:20}[/] {count:3} uses")
+        console.print()
 
 
 def multiline_input(prompt_text: str, hint: str = "") -> str:
@@ -586,7 +635,7 @@ Start now."""
         
         self.running = False
         status = self.orchestrator.get_status()
-        print_final_summary(status, time.time() - start_time)
+        print_final_summary(status, time.time() - start_time, self.orchestrator)
     
     def cmd_status(self):
         if not self.workspace:
